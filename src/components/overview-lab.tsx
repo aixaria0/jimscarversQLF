@@ -46,6 +46,7 @@ export function OverviewLab({
   const passing = checks.filter((item) => item.holds).length;
   const liveNodes = sim?.nodes.filter((node) => node.alive).length ?? 0;
   const leader = sim ? leaderOf(sim) : null;
+  const reachableNodes = leader ? sim!.nodes.filter((node) => node.alive && node.partition === leader.partition).length : 0;
   const filteredModules = useMemo(
     () => MODULES.filter((item) => `${item.title} ${item.group} ${item.description}`.toLowerCase().includes(query.toLowerCase())),
     [query],
@@ -71,7 +72,7 @@ export function OverviewLab({
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Live cluster summary">
         <Metric label="Cluster" value={sim ? (sim.running ? "Running" : "Paused") : "Starting"} detail="Raft · 5 servers" active={Boolean(sim?.running)} />
         <Metric label="Elected leader" value={leader ? `Server ${leader.id + 1}` : "No leader"} detail={leader ? `Term ${leader.currentTerm}` : "Election in progress"} active={Boolean(leader)} />
-        <Metric label="Quorum" value={`${liveNodes} / ${MAJORITY}`} detail={liveNodes >= MAJORITY ? "Enough live servers" : "Below majority"} active={liveNodes >= MAJORITY} />
+        <Metric label="Reachable quorum" value={leader ? `${reachableNodes} / ${MAJORITY}` : `— / ${MAJORITY}`} detail={!leader ? "Waiting for a leader" : reachableNodes >= MAJORITY ? `${liveNodes} servers online` : "Below majority in leader partition"} active={Boolean(leader) && reachableNodes >= MAJORITY} />
         <Metric label="Safety checks" value={sim ? `${passing} / ${checks.length}` : "—"} detail={checks.some((item) => !item.holds) ? "Review current witness" : "Evaluated on live state"} active={Boolean(sim) && checks.every((item) => item.holds)} />
       </section>
 
