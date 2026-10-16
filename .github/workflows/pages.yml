@@ -32,8 +32,11 @@ jobs:
           VITE_AUTH_ENABLED: "false"
       - name: Verify static output
         run: test -s dist/client/index.html
-      - name: Preserve static asset paths
-        run: touch dist/client/.nojekyll
+      - name: Preserve static asset paths and custom domain
+        run: |
+          touch dist/client/.nojekyll
+          echo sunaria.si > dist/client/CNAME
+          grep -q "Consensus, made inspectable." dist/client/index.html
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
