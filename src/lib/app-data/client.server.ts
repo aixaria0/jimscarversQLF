@@ -15,8 +15,6 @@ import {
 
 assertAppDataServerOnly("app-data/client.server");
 
-export const CONNECTORS_HOST_STAGING = "connectors.app-builder-testing.com";
-export const CONNECTORS_HOST_PROD = "connectors.grok.me";
 
 function env(key: string): string | undefined {
   const v = process.env[key]?.trim();
@@ -34,20 +32,11 @@ type InboundContext = {
 };
 
 function connectorsBaseFor(publicHost: string | null): string | null {
-  const explicit = env("GROK_CONNECTORS_URL");
+  const explicit = env("CONNECTORS_URL");
   if (explicit) return explicit.replace(/\/+$/, "");
 
   const host = publicHost?.toLowerCase();
   if (!host || isLoopbackHost(host)) return null;
-  if (
-    host === "app-builder-testing.com" ||
-    host.endsWith(".app-builder-testing.com")
-  ) {
-    return `https://${CONNECTORS_HOST_STAGING}`;
-  }
-  if (host === "grok.me" || host.endsWith(".grok.me")) {
-    return `https://${CONNECTORS_HOST_PROD}`;
-  }
   return null;
 }
 
@@ -68,7 +57,7 @@ function inboundContext(): InboundContext {
   const envToken =
     process.env.NODE_ENV === "production"
       ? null
-      : (env("GROK_CONNECTOR_ACCESS_TOKEN") ?? null);
+      : (env("CONNECTOR_ACCESS_TOKEN") ?? null);
   return {
     token: headerToken ?? envToken,
     publicHost,

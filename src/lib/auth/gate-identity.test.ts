@@ -211,15 +211,15 @@ describe("gateIdentityFromHeaders", () => {
   it("verifies the header token end to end and fails closed without it", async () => {
     const key = await makeKey("k1");
     const { fetchImpl } = staticJwks([key.jwk]);
-    process.env.GROK_PROJECT_ID = "proj-123";
-    process.env.GROK_GATE_ORIGIN = ISSUER;
+    process.env.PROJECT_ID = "proj-123";
+    process.env.AUTH_GATE_ORIGIN = ISSUER;
     try {
       const token = await signToken(key, {
         sub: "user-1",
         email: "viewer@example.com",
       });
       const withToken = await gateIdentityFromHeaders(
-        new Headers({ "x-grok-identity": token }),
+        new Headers({ "x-app-identity": token }),
         fetchImpl,
       );
       assert.equal(withToken?.sub, "user-1");
@@ -230,20 +230,20 @@ describe("gateIdentityFromHeaders", () => {
       );
       assert.equal(withoutToken, null);
     } finally {
-      delete process.env.GROK_PROJECT_ID;
-      delete process.env.GROK_GATE_ORIGIN;
+      delete process.env.PROJECT_ID;
+      delete process.env.AUTH_GATE_ORIGIN;
     }
   });
 
-  it("activates on a deployed-shaped request without GROK_GATE_ORIGIN", async () => {
+  it("activates on a deployed-shaped request without AUTH_GATE_ORIGIN", async () => {
     const key = await makeKey("k-deployed");
     const fetchedFrom: string[] = [];
     const fetchImpl = async (url: string): Promise<GateJwks> => {
       fetchedFrom.push(url);
       return { keys: [key.jwk] };
     };
-    process.env.GROK_PROJECT_ID = "proj-123";
-    delete process.env.GROK_GATE_ORIGIN;
+    process.env.PROJECT_ID = "proj-123";
+    delete process.env.AUTH_GATE_ORIGIN;
     try {
       const token = await signToken(key, {
         sub: "user-1",
@@ -252,7 +252,7 @@ describe("gateIdentityFromHeaders", () => {
       const identity = await gateIdentityFromHeaders(
         new Headers({
           host: "my-app.app-builder-testing.com",
-          "x-grok-identity": token,
+          "x-app-identity": token,
         }),
         fetchImpl,
       );
@@ -262,30 +262,30 @@ describe("gateIdentityFromHeaders", () => {
         "https://gate.app-builder-testing.com/__gate/identity-key",
       );
     } finally {
-      delete process.env.GROK_PROJECT_ID;
+      delete process.env.PROJECT_ID;
     }
   });
 
-  it("fails closed when GROK_PROJECT_ID is unset", async () => {
+  it("fails closed when PROJECT_ID is unset", async () => {
     const key = await makeKey("k1");
     const { fetchImpl } = staticJwks([key.jwk]);
-    delete process.env.GROK_PROJECT_ID;
-    process.env.GROK_GATE_ORIGIN = ISSUER;
+    delete process.env.PROJECT_ID;
+    process.env.AUTH_GATE_ORIGIN = ISSUER;
     try {
       const token = await signToken(key, { sub: "user-1" });
       const identity = await gateIdentityFromHeaders(
-        new Headers({ "x-grok-identity": token }),
+        new Headers({ "x-app-identity": token }),
         fetchImpl,
       );
       assert.equal(identity, null);
     } finally {
-      delete process.env.GROK_GATE_ORIGIN;
+      delete process.env.AUTH_GATE_ORIGIN;
     }
   });
 });
 
 describe("sessionBoundToGateIdentity", () => {
-  const provider = "grok-gate";
+  const provider = "app-gate";
 
   it("keeps the session when it is bound to the same gate sub", () => {
     assert.equal(

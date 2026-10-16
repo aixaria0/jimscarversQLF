@@ -28,7 +28,7 @@ async function withStubbedGate(
   body: Record<string, unknown>,
   run: (calls: () => number) => Promise<void>,
 ): Promise<void> {
-  process.env.GROK_CONNECTORS_URL = "https://connectors.invalid.example";
+  process.env.CONNECTORS_URL = "https://connectors.invalid.example";
   const realFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = (async () => {
@@ -39,7 +39,7 @@ async function withStubbedGate(
     await run(() => calls);
   } finally {
     globalThis.fetch = realFetch;
-    delete process.env.GROK_CONNECTORS_URL;
+    delete process.env.CONNECTORS_URL;
   }
 }
 
@@ -138,7 +138,7 @@ describe("callTool failure memo", () => {
 
 describe("callTool", () => {
   it("resolves ok:false for non-serializable args instead of rejecting", async () => {
-    process.env.GROK_CONNECTORS_URL = "https://connectors.invalid.example";
+    process.env.CONNECTORS_URL = "https://connectors.invalid.example";
     try {
       const circular: Record<string, unknown> = {};
       circular.self = circular;
@@ -153,7 +153,7 @@ describe("callTool", () => {
       assert.equal(result.ok, false);
       assert.match(result.errorMessage ?? "", /circular/i);
     } finally {
-      delete process.env.GROK_CONNECTORS_URL;
+      delete process.env.CONNECTORS_URL;
     }
   });
 });
@@ -189,7 +189,7 @@ describe("redirectToLoginIfRequired", () => {
           assign: (u) => {
             target = u;
           },
-          href: "https://my-app.grok.me/current",
+          href: "https://my-app.service.example/current",
         },
       },
       () =>
@@ -211,7 +211,7 @@ describe("redirectToLoginIfRequired", () => {
           assign: (u) => {
             target = u;
           },
-          href: "https://my-app.grok.me/current",
+          href: "https://my-app.service.example/current",
         },
       },
       () =>
@@ -219,11 +219,11 @@ describe("redirectToLoginIfRequired", () => {
           ok: false,
           data: null,
           loginRequired: true,
-          loginUrl: "https://gate.grok.me/__gate/signin?return_to=x",
+          loginUrl: "https://gate.service.example/__gate/signin?return_to=x",
         }),
     );
     assert.equal(did, true);
-    assert.equal(target, "https://gate.grok.me/__gate/signin?return_to=x");
+    assert.equal(target, "https://gate.service.example/__gate/signin?return_to=x");
   });
 
   it("returns false when the result has no loginUrl", () => {
@@ -234,7 +234,7 @@ describe("redirectToLoginIfRequired", () => {
           assign: (u) => {
             target = u;
           },
-          href: "https://my-app.grok.me/current",
+          href: "https://my-app.service.example/current",
         },
       },
       () =>
@@ -249,7 +249,7 @@ describe("redirectToLoginIfRequired", () => {
       ok: false,
       data: null,
       loginRequired: true,
-      loginUrl: "https://gate.grok.me/__gate/signin?return_to=x",
+      loginUrl: "https://gate.service.example/__gate/signin?return_to=x",
     });
     assert.equal(did, false);
   });

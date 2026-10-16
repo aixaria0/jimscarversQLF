@@ -13,8 +13,8 @@ import {
   sessionBoundToGateIdentity,
 } from "./gate-identity.server";
 
-export const GATE_PROVIDER_ID = "grok-gate";
-const GATE_ACCOUNT_ISSUER = "https://grok.com";
+export const GATE_PROVIDER_ID = "app-gate";
+const GATE_ACCOUNT_ISSUER = "https://preview.example.com";
 const LOG = "[gate-identity]";
 
 type GateAccount = Parameters<typeof handleOAuthUserInfo>[1]["account"];
@@ -150,7 +150,7 @@ function removeRequestCookie(headers: Headers, name: string): void {
 
 export function gateIdentitySessions() {
   return {
-    id: "grok-gate-identity",
+    id: "app-gate-identity",
     hooks: {
       before: [
         {
@@ -222,10 +222,10 @@ export function gateIdentitySessions() {
                 userInfo: {
                   id: identity.sub,
                   email: (
-                    identity.email ?? `${identity.sub}@viewer.grok.invalid`
+                    identity.email ?? `${identity.sub}@viewer.app.invalid`
                   ).toLowerCase(),
                   emailVerified: Boolean(identity.email),
-                  name: identity.name ?? "Grok user",
+                  name: identity.name ?? "App user",
                 },
                 account: {
                   providerId: GATE_PROVIDER_ID,
