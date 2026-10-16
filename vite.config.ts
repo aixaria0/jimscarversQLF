@@ -143,7 +143,10 @@ function authPopupPlugin(): Plugin {
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
+const isGitHubPages = process.env.GITHUB_PAGES === "true";
+
 export default defineConfig(({ command, isPreview }) => ({
+  base: isGitHubPages ? "/jimscarversQLF/" : "/",
   server: {
     host: "0.0.0.0",
     port: 8080,
@@ -162,13 +165,19 @@ export default defineConfig(({ command, isPreview }) => ({
     // Dev-only /__app-env, read by scripts/check-auth-invariant.mjs.
     appEnvPlugin(),
     tailwindcss(),
-    tanstackStart(),
+    tanstackStart({
+      prerender: isGitHubPages
+        ? { enabled: true, crawlLinks: true, failOnError: true }
+        : undefined,
+    }),
     ...(command === "build" || isPreview
-      ? [
-          nitro({
-            preset: "vercel",
-          }),
-        ]
+      ? isGitHubPages
+        ? []
+        : [
+            nitro({
+              preset: "vercel",
+            }),
+          ]
       : []),
     viteReact(),
   ],
