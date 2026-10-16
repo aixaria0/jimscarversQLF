@@ -50,7 +50,7 @@ type Module = "argument" | JumpMod;
 type Sub = "spec" | "exec" | "tlc" | "proofs";
 
 const NAV: { id: Module; label: string }[] = [
-  { id: "argument", label: "Argument" },
+  { id: "argument", label: "Overview" },
   { id: "raft", label: "Raft" },
   { id: "paxos", label: "Paxos" },
   { id: "multi", label: "Multi-Paxos" },
@@ -144,12 +144,12 @@ export function Workbench() {
           <div className="flex items-baseline justify-between gap-3">
             <button type="button" className="text-left" onClick={() => setMod("argument")}>
               <p className="font-mono text-xs uppercase tracking-widest text-faint">
-                Formal consensus workbench
+                CONSENSUS / FORMAL METHODS
               </p>
               <h1 className="font-display text-2xl font-medium tracking-tight sm:text-3xl">QFL</h1>
             </button>
             <p className="hidden max-w-sm text-right text-xs leading-relaxed text-faint sm:block">
-              Annotated TLA+, proof obligations, TLC with mutations, GHZ + surface code, mesa / Löb / HoTT.
+              Explore protocols, inspect traces, and check safety properties.
             </p>
           </div>
           <nav className="-mx-1 flex gap-1 overflow-x-auto pb-1" aria-label="Modules">
@@ -193,7 +193,7 @@ export function Workbench() {
           </div>
         ) : null}
 
-        {mod === "argument" ? <OverviewLab onOpen={open} /> : null}
+        {mod === "argument" ? <OverviewLab onOpen={open} sim={sim} /> : null}
 
         {mod === "raft" && sub === "spec" ? <SpecPanel doc={RAFT_SPEC} /> : null}
         {mod === "raft" && sub === "tlc" ? <TlcPanel kind="raft" /> : null}
