@@ -1,14 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <rect width="32" height="32" fill="#09090b"/>
   <polygon
-    points="16,5.5 25.99,12.76 22.17,24.49 9.83,24.49 6.01,12.76"
+    points="16,6 25.51,12.91 21.88,24.09 10.12,24.09 6.49,12.91"
     fill="none"
     stroke="#c8ccd4"
-    stroke-width="1.25"
+    stroke-width="1.5"
     stroke-linejoin="round"/>
-  <circle cx="25.99" cy="12.76" r="2.45" fill="#09090b" stroke="#c8ccd4" stroke-width="1.35"/>
-  <circle cx="22.17" cy="24.49" r="2.45" fill="#09090b" stroke="#c8ccd4" stroke-width="1.35"/>
-  <circle cx="9.83" cy="24.49" r="2.45" fill="#09090b" stroke="#c8ccd4" stroke-width="1.35"/>
-  <circle cx="6.01" cy="12.76" r="2.45" fill="#09090b" stroke="#c8ccd4" stroke-width="1.35"/>
-  <circle cx="16" cy="5.5" r="2.55" fill="#c8ccd4"/>
+  <circle cx="25.51" cy="12.91" r="2.6" fill="#09090b" stroke="#c8ccd4" stroke-width="1.5"/>
+  <circle cx="21.88" cy="24.09" r="2.6" fill="#09090b" stroke="#c8ccd4" stroke-width="1.5"/>
+  <circle cx="10.12" cy="24.09" r="2.6" fill="#09090b" stroke="#c8ccd4" stroke-width="1.5"/>
+  <circle cx="6.49" cy="12.91" r="2.6" fill="#09090b" stroke="#c8ccd4" stroke-width="1.5"/>
+  <circle cx="16" cy="6" r="2.75" fill="#c8ccd4"/>
 </svg>

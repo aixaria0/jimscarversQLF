@@ -23,7 +23,15 @@ import {
 import type { SimState } from "@/lib/raft";
 import { cn } from "@/lib/utils";
 
-export function MesaLab({ raft, paxos }: { raft: SimState | null; paxos: PaxosState }) {
+export function MesaLab({
+  raft,
+  paxos,
+  onStarve,
+}: {
+  raft: SimState | null;
+  paxos: PaxosState;
+  onStarve?: (on: boolean) => void;
+}) {
   const [inject, setInject] = useState<MesaInject>({ proposer: "honest", acceptor: "honest" });
   const [local, setLocal] = useState<PaxosState>(() => structuredClonePaxos(paxos));
   const raftReport = evaluateRaftMesa(raft);
@@ -132,6 +140,15 @@ export function MesaLab({ raft, paxos }: { raft: SimState | null; paxos: PaxosSt
         <div className="flex flex-col gap-3">
           <ReportCard title="Paxos proposer / acceptor" report={paxosReport} />
           <ReportCard title="Raft replica policies" report={raftReport} />
+          {onStarve ? (
+            <Button
+              size="sm"
+              variant={raft?.mesaStarveCatchup ? "primary" : "secondary"}
+              onClick={() => onStarve(!raft?.mesaStarveCatchup)}
+            >
+              {raft?.mesaStarveCatchup ? "Raft mesa-leader on (heartbeats only)" : "Inject Raft mesa-leader"}
+            </Button>
+          ) : null}
         </div>
       </section>
 
@@ -139,6 +156,43 @@ export function MesaLab({ raft, paxos }: { raft: SimState | null; paxos: PaxosSt
         <h3 className="font-display text-lg font-medium tracking-tight">Lemma chain</h3>
         <div className="mt-3">
           <ProofsPanel title="MesaDetect" items={MESA_OBLIGATIONS} />
+        </div>
+      </section>
+
+      <section>
+        <p className="font-mono text-xs uppercase tracking-widest text-faint">Diagonal lemma</p>
+        <h3 className="mt-1 font-display text-xl font-medium tracking-tight">Gödel · Löb · HoTT</h3>
+        <div className="mt-3 grid gap-3 lg:grid-cols-3">
+          <article className="rounded-xl border border-border bg-surface p-4">
+            <p className="font-mono text-xs text-faint">Gödel</p>
+            <p className="mt-2 font-mono text-xs leading-relaxed text-fg">
+              ∃ γ :  PA ⊢ γ ↔ ¬Provable(⌜γ⌝)
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-muted">
+              Second incompleteness is the instance γ := Con(PA). A replica cannot prove its own
+              MesaFree from inside the protocol.
+            </p>
+          </article>
+          <article className="rounded-xl border border-border bg-surface p-4">
+            <p className="font-mono text-xs text-faint">Löb</p>
+            <p className="mt-2 font-mono text-xs leading-relaxed text-fg">
+              PA ⊢ □(□P → P)  ⇒  PA ⊢ □P
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-muted">
+              Contrapositively: a self-certificate “if I am consistent then I am safe” does not
+              discharge Safe. NoIllicitDischarge increments mesaSuspicion instead.
+            </p>
+          </article>
+          <article className="rounded-xl border border-border bg-surface p-4">
+            <p className="font-mono text-xs text-faint">HoTT</p>
+            <p className="mt-2 font-mono text-xs leading-relaxed text-fg">
+              isContr(Σ (h : Server → HiddenObj), Π i, Id (h i) ProtocolObj)
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-muted">
+              A mesa path is a hidden homotopy of choose that is observationally refl on every
+              quorum projection. Detection is contractibility of that path space — only refl inhabits it.
+            </p>
+          </article>
         </div>
       </section>
 

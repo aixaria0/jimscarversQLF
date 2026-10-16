@@ -79,6 +79,8 @@ export type SimState = {
   speed: number;
   running: boolean;
   commandSeq: number;
+  /** Mesa-leader: heartbeats only, no catch-up entries. Protocol-legal, starves log-fidelity. */
+  mesaStarveCatchup: boolean;
 };
 
 const ELECTION_MIN = 280;
@@ -183,7 +185,7 @@ function replicateTo(leader: NodeState, followerId: number, sim: SimState) {
     leaderId: leader.id,
     prevLogIndex,
     prevLogTerm,
-    entries: leader.log.slice(next),
+    entries: sim.mesaStarveCatchup ? [] : leader.log.slice(next),
     leaderCommit: leader.commitIndex,
   });
 }
@@ -340,6 +342,7 @@ export function createSim(): SimState {
     speed: 2,
     running: true,
     commandSeq: 0,
+    mesaStarveCatchup: false,
   };
 }
 

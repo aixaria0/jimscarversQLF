@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   PAXOS_CFG,
@@ -27,19 +27,32 @@ export function TlcPanel({ kind }: { kind: "raft" | "paxos" }) {
   const [result, setResult] = useState<TLCResult | null>(null);
   const [running, setRunning] = useState(false);
   const [mutation, setMutation] = useState<TLCMutation>("none");
+  const gen = useRef(0);
   const cmd = kind === "raft" ? RAFT_TLC_CMD : PAXOS_TLC_CMD;
   const cfg = kind === "raft" ? RAFT_CFG : PAXOS_CFG;
   const muts = kind === "raft" ? RAFT_MUTS : PAXOS_MUTS;
 
-  const run = () => {
+  const run = (mut: TLCMutation) => {
+    const id = ++gen.current;
+    setMutation(mut);
     setRunning(true);
     setResult(null);
     window.setTimeout(() => {
-      const r = kind === "raft" ? runRaftTLC(mutation) : runPaxosTLC(1, mutation);
+      if (id !== gen.current) return;
+      const r = kind === "raft" ? runRaftTLC(mut) : runPaxosTLC(1, mut);
+      if (id !== gen.current) return;
       setResult(r);
       setRunning(false);
-    }, 20);
+    }, 30);
   };
+
+  useEffect(() => {
+    run("none");
+    return () => {
+      gen.current += 1;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -65,10 +78,7 @@ export function TlcPanel({ kind }: { kind: "raft" | "paxos" }) {
           <button
             key={m.id}
             type="button"
-            onClick={() => {
-              setMutation(m.id);
-              setResult(null);
-            }}
+            onClick={() => run(m.id)}
             className={cn(
               "rounded-md px-3 py-2 text-xs",
               mutation === m.id ? "bg-subtle text-fg" : "text-faint hover:text-fg",
@@ -78,10 +88,12 @@ export function TlcPanel({ kind }: { kind: "raft" | "paxos" }) {
           </button>
         ))}
       </div>
-      <Button onClick={run} disabled={running} className="w-fit">
+      <Button onClick={() => run(mutation)} disabled={running} className="w-fit">
         {running ? "Checking…" : "Check model"}
       </Button>
-      {result ? <TlcResultView result={result} /> : null}
+      {result ? <TlcResultView result={result} /> : running ? (
+        <p className="font-mono text-xs text-faint">Checking {mutation === "none" ? "intact" : mutation}…</p>
+      ) : null}
     </div>
   );
 }

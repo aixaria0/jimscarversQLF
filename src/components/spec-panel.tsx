@@ -37,7 +37,18 @@ export function SpecPanel({ doc }: { doc: SpecDoc }) {
             <p className="font-mono text-xs uppercase tracking-widest text-faint">{doc.module}.tla</p>
             <h2 className="font-display text-xl font-medium tracking-tight">{doc.title}</h2>
           </div>
-          <p className="hidden max-w-xs text-right text-xs text-faint sm:block">{doc.source}</p>
+          <div className="flex items-center gap-2">
+            <p className="hidden max-w-xs text-right text-xs text-faint sm:block">{doc.source}</p>
+            <button
+              type="button"
+              className="rounded-md px-2 py-1 font-mono text-xs text-muted hover:bg-subtle hover:text-fg"
+              onClick={() => {
+                void navigator.clipboard.writeText(doc.lines.map((l) => l.t).join("\n"));
+              }}
+            >
+              Copy
+            </button>
+          </div>
         </div>
         <div className="mt-3 max-h-[70vh] overflow-auto rounded-xl border border-border bg-subtle p-3 font-mono text-xs leading-relaxed">
           {doc.lines.map((line, i) => {

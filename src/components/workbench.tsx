@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { ByzantineLab } from "@/components/byzantine-lab";
 import { ClusterView, NodeInspector } from "@/components/cluster-view";
+import { ImplLab } from "@/components/impl-lab";
 import { InvList } from "@/components/inv-list";
 import { MappingLab } from "@/components/mapping-lab";
 import { MesaLab } from "@/components/mesa-lab";
+import { MultiExec } from "@/components/multi-exec";
+import { OverviewLab, type JumpMod } from "@/components/overview-lab";
 import { FailureFlow, PaxosFlow } from "@/components/paxos-flow";
 import { ProofsPanel } from "@/components/proofs-panel";
 import { QuantumLab } from "@/components/quantum-lab";
@@ -12,6 +15,7 @@ import { TlcPanel } from "@/components/tlc-panel";
 import { Button } from "@/components/ui/button";
 import { clonePbft, createPbft, type PbftState } from "@/lib/byzantine";
 import { paxosInvariants, raftInvariants } from "@/lib/invariants";
+import { createMulti, type MpState } from "@/lib/multi-paxos";
 import {
   ACCEPTORS,
   chosenValues,
@@ -26,7 +30,7 @@ import {
   runHappyPath,
   type PaxosState,
 } from "@/lib/paxos";
-import { PAXOS_OBLIGATIONS, RAFT_OBLIGATIONS } from "@/lib/proofs";
+import { MULTI_OBLIGATIONS, PAXOS_OBLIGATIONS, RAFT_OBLIGATIONS } from "@/lib/proofs";
 import {
   cloneSim,
   crashNode,
@@ -42,14 +46,16 @@ import {
 import { MULTI_SPEC, PAXOS_SPEC, RAFT_SPEC } from "@/lib/specs";
 import { cn } from "@/lib/utils";
 
-type Module = "raft" | "paxos" | "multi" | "mapping" | "byzantine" | "quantum" | "mesa";
+type Module = "argument" | JumpMod;
 type Sub = "spec" | "exec" | "tlc" | "proofs";
 
 const NAV: { id: Module; label: string }[] = [
+  { id: "argument", label: "Argument" },
   { id: "raft", label: "Raft" },
   { id: "paxos", label: "Paxos" },
   { id: "multi", label: "Multi-Paxos" },
   { id: "mapping", label: "Mapping" },
+  { id: "impl", label: "Kernel" },
   { id: "byzantine", label: "Byzantine" },
   { id: "quantum", label: "Quantum" },
   { id: "mesa", label: "Mesa / Löb" },
@@ -57,16 +63,17 @@ const NAV: { id: Module; label: string }[] = [
 
 function subsFor(mod: Module): Sub[] {
   if (mod === "raft" || mod === "paxos") return ["spec", "exec", "tlc", "proofs"];
-  if (mod === "multi") return ["spec", "proofs"];
+  if (mod === "multi") return ["spec", "exec", "proofs"];
   if (mod === "byzantine") return ["spec", "exec"];
   return [];
 }
 
 export function Workbench() {
-  const [mod, setMod] = useState<Module>("raft");
+  const [mod, setMod] = useState<Module>("argument");
   const [sub, setSub] = useState<Sub>("spec");
   const [sim, setSim] = useState<SimState | null>(null);
   const [paxos, setPaxos] = useState<PaxosState>(() => createPaxos());
+  const [multi, setMulti] = useState<MpState>(() => createMulti());
   const [pbft, setPbft] = useState<PbftState>(() => createPbft());
   const [selected, setSelected] = useState(0);
   const [draft, setDraft] = useState("v1");
@@ -122,6 +129,12 @@ export function Workbench() {
     });
   };
 
+  const open = (next: JumpMod, nextSub?: Sub) => {
+    setMod(next);
+    const available = subsFor(next);
+    setSub(nextSub && available.includes(nextSub) ? nextSub : (available[0] ?? "spec"));
+  };
+
   const available = subsFor(mod);
 
   return (
@@ -129,10 +142,12 @@ export function Workbench() {
       <header className="sticky top-0 z-20 border-b border-border bg-bg/90 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:px-6">
           <div className="flex items-baseline justify-between gap-3">
-            <div>
-              <p className="font-mono text-xs uppercase tracking-widest text-faint">Formal consensus workbench</p>
+            <button type="button" className="text-left" onClick={() => setMod("argument")}>
+              <p className="font-mono text-xs uppercase tracking-widest text-faint">
+                Formal consensus workbench
+              </p>
               <h1 className="font-display text-2xl font-medium tracking-tight sm:text-3xl">QFL</h1>
-            </div>
+            </button>
             <p className="hidden max-w-sm text-right text-xs leading-relaxed text-faint sm:block">
               Annotated TLA+, proof obligations, TLC with mutations, GHZ + surface code, mesa / Löb / HoTT.
             </p>
@@ -178,9 +193,13 @@ export function Workbench() {
           </div>
         ) : null}
 
+        {mod === "argument" ? <OverviewLab onOpen={open} /> : null}
+
         {mod === "raft" && sub === "spec" ? <SpecPanel doc={RAFT_SPEC} /> : null}
         {mod === "raft" && sub === "tlc" ? <TlcPanel kind="raft" /> : null}
-        {mod === "raft" && sub === "proofs" ? <ProofsPanel title="raft_invariants" items={RAFT_OBLIGATIONS} /> : null}
+        {mod === "raft" && sub === "proofs" ? (
+          <ProofsPanel title="raft_invariants" items={RAFT_OBLIGATIONS} />
+        ) : null}
         {mod === "raft" && sub === "exec" ? (
           <RaftExec
             sim={sim}
@@ -194,16 +213,34 @@ export function Workbench() {
 
         {mod === "paxos" && sub === "spec" ? <SpecPanel doc={PAXOS_SPEC} /> : null}
         {mod === "paxos" && sub === "tlc" ? <TlcPanel kind="paxos" /> : null}
-        {mod === "paxos" && sub === "proofs" ? <ProofsPanel title="BasicPaxos" items={PAXOS_OBLIGATIONS} /> : null}
+        {mod === "paxos" && sub === "proofs" ? (
+          <ProofsPanel title="BasicPaxos" items={PAXOS_OBLIGATIONS} />
+        ) : null}
         {mod === "paxos" && sub === "exec" ? <PaxosExec state={paxos} edit={editPaxos} /> : null}
 
         {mod === "multi" && sub === "spec" ? <SpecPanel doc={MULTI_SPEC} /> : null}
-        {mod === "multi" && sub === "proofs" ? <ProofsPanel title="MultiPaxos / Raft" items={RAFT_OBLIGATIONS} /> : null}
+        {mod === "multi" && sub === "exec" ? <MultiExec state={multi} setState={setMulti} /> : null}
+        {mod === "multi" && sub === "proofs" ? (
+          <ProofsPanel title="MultiPaxos" items={MULTI_OBLIGATIONS} />
+        ) : null}
 
         {mod === "mapping" ? <MappingLab /> : null}
-        {mod === "byzantine" ? <ByzantineLab state={pbft} edit={editPbft} sub={sub === "exec" ? "exec" : "spec"} /> : null}
+        {mod === "impl" ? <ImplLab /> : null}
+        {mod === "byzantine" ? (
+          <ByzantineLab state={pbft} edit={editPbft} sub={sub === "exec" ? "exec" : "spec"} />
+        ) : null}
         {mod === "quantum" ? <QuantumLab /> : null}
-        {mod === "mesa" ? <MesaLab raft={sim} paxos={paxos} /> : null}
+        {mod === "mesa" ? (
+          <MesaLab
+            raft={sim}
+            paxos={paxos}
+            onStarve={(on) =>
+              mutate((s) => {
+                s.mesaStarveCatchup = on;
+              })
+            }
+          />
+        ) : null}
       </main>
     </div>
   );
@@ -282,6 +319,17 @@ function RaftExec({
             variant="ghost"
             onClick={() =>
               mutate((s) => {
+                s.mesaStarveCatchup = !s.mesaStarveCatchup;
+              })
+            }
+          >
+            {sim.mesaStarveCatchup ? "Catch-up on" : "Mesa starve"}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              mutate((s) => {
                 const fresh = createSim();
                 Object.assign(s, fresh);
               })
@@ -293,6 +341,7 @@ function RaftExec({
         <p className="mt-3 font-mono text-xs text-faint">
           time={sim.time} · leader={leader ? `s${leader.id + 1}` : "Nil"} · term={leader?.currentTerm ?? "—"} · msgs=
           {sim.network.length}
+          {sim.mesaStarveCatchup ? " · MESA starve-catch-up" : ""}
         </p>
         <ClusterView sim={sim} selected={selected} onSelect={setSelected} />
         <NodeInspector sim={sim} id={selected} />

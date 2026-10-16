@@ -152,36 +152,38 @@ export function evaluateRaftMesa(sim: SimState | null): MesaReport {
     split.set(l.currentTerm, arr);
   }
   const twoLeaders = [...split.values()].some((ids) => ids.length > 1);
+  const starve = Boolean(sim.mesaStarveCatchup);
 
   const replicas: ReplicaPolicy[] = sim.nodes.map((n) => {
-    const hidden: ReplicaPolicy["hiddenObj"] =
-      n.role === "candidate" ? "re-elect-self" : "log-fidelity";
-    // Candidates timing out is protocol, not mesa. Hidden equals protocol unless they skip up-to-date.
-    const isMesa = false;
+    const isLeader = n.role === "leader" && n.alive;
+    const hidden: ReplicaPolicy["hiddenObj"] = isLeader && starve ? "starve-slot" : "log-fidelity";
     return {
       id: n.id,
-      role: n.role === "leader" ? "leader" : n.role === "candidate" ? "proposer" : "follower",
+      role: isLeader ? "leader" : n.role === "candidate" ? "proposer" : "follower",
       protocolObj: "log-fidelity",
-      hiddenObj: isMesa ? hidden : "log-fidelity",
-      actions: [],
-      delta: 0,
+      hiddenObj: hidden,
+      actions: isLeader ? ["AppendEntries"] : ["HandleAppendEntriesRequest"],
+      delta: isLeader && starve ? 0.7 : 0,
     };
   });
 
+  const free = replicas.every((r) => r.hiddenObj === r.protocolObj);
   const notes = [
     twoLeaders
-      ? "ElectionSafety FALSE — two leaders of one term. This is a protocol bug, not mesa."
-      : "ElectionSafety holds. Timeout/RequestVote is the specified election utility, not a hidden objective.",
-    "A Raft mesa-leader would drop follower catch-up while remaining AppendEntries-legal (heartbeats only). This cluster does not inject that policy — toggle it in Mesa / Löb.",
+      ? "ElectionSafety FALSE — two leaders of one term. Protocol bug, not mesa."
+      : "ElectionSafety holds.",
+    starve
+      ? "Mesa-leader: AppendEntries carries empty entries (heartbeats only). ObservableLegal holds. Followers never catch up. MesaFree fails on log-fidelity; Inv uniqueness still holds."
+      : "Catch-up enabled. Hidden objective equals specified log-fidelity.",
     "Löb: a leader advertising □(□LeaderCompleteness → LeaderCompleteness) has not proved LeaderCompleteness.",
   ];
 
   return {
-    free: true,
+    free,
     observableLegal: !twoLeaders,
     replicas,
     lobHolds: true,
-    illicitDischarge: false,
+    illicitDischarge: starve,
     notes,
   };
 }

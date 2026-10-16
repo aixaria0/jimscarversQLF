@@ -4,7 +4,7 @@ import { v as require_jsx_runtime } from "../_libs/@tanstack/react-router+[...].
 import { t as Slot } from "../_libs/radix-ui__react-slot.mjs";
 import { n as clsx, t as cva } from "../_libs/class-variance-authority+clsx.mjs";
 import { t as twMerge } from "../_libs/tailwind-merge.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-Cib9lW2R.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-DQtiFEiG.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 function cn(...inputs) {
@@ -67,9 +67,19 @@ function SpecPanel({ doc }) {
 				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
 					className: "font-display text-xl font-medium tracking-tight",
 					children: doc.title
-				})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-					className: "hidden max-w-xs text-right text-xs text-faint sm:block",
-					children: doc.source
+				})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "flex items-center gap-2",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "hidden max-w-xs text-right text-xs text-faint sm:block",
+						children: doc.source
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "rounded-md px-2 py-1 font-mono text-xs text-muted hover:bg-subtle hover:text-fg",
+						onClick: () => {
+							navigator.clipboard.writeText(doc.lines.map((l) => l.t).join("\n"));
+						},
+						children: "Copy"
+					})]
 				})]
 			}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 				className: "mt-3 max-h-[70vh] overflow-auto rounded-xl border border-border bg-subtle p-3 font-mono text-xs leading-relaxed",
@@ -877,7 +887,7 @@ function replicateTo(leader, followerId, sim) {
 		leaderId: leader.id,
 		prevLogIndex,
 		prevLogTerm,
-		entries: leader.log.slice(next),
+		entries: sim.mesaStarveCatchup ? [] : leader.log.slice(next),
 		leaderCommit: leader.commitIndex
 	});
 }
@@ -1017,7 +1027,8 @@ function createSim() {
 		}],
 		speed: 2,
 		running: true,
-		commandSeq: 0
+		commandSeq: 0,
+		mesaStarveCatchup: false
 	};
 }
 function cloneSim(sim) {
@@ -1997,14 +2008,14 @@ function forcedValue(state, b) {
 	}
 	return val;
 }
-function quorumPromised(state, b) {
+function quorumPromised$1(state, b) {
 	const S = promisesFor(state, b);
 	const accs = new Set(S.map((m) => m.acc));
 	return QUORUMS$1.some((q) => q.every((a) => accs.has(a)));
 }
 function phase2a(state, b, v, skipForce = false) {
 	if (state.msgs.some((m) => m.type === "2a" && m.bal === b)) return false;
-	if (!quorumPromised(state, b)) {
+	if (!quorumPromised$1(state, b)) {
 		state.log = [`Phase2a(${b}) refused — no quorum of 1b`, ...state.log].slice(0, 24);
 		return false;
 	}
@@ -2169,26 +2180,28 @@ function evaluateRaftMesa(sim) {
 		split.set(l.currentTerm, arr);
 	}
 	const twoLeaders = [...split.values()].some((ids) => ids.length > 1);
+	const starve = Boolean(sim.mesaStarveCatchup);
 	const replicas = sim.nodes.map((n) => {
-		n.role;
+		const isLeader = n.role === "leader" && n.alive;
+		const hidden = isLeader && starve ? "starve-slot" : "log-fidelity";
 		return {
 			id: n.id,
-			role: n.role === "leader" ? "leader" : n.role === "candidate" ? "proposer" : "follower",
+			role: isLeader ? "leader" : n.role === "candidate" ? "proposer" : "follower",
 			protocolObj: "log-fidelity",
-			hiddenObj: "log-fidelity",
-			actions: [],
-			delta: 0
+			hiddenObj: hidden,
+			actions: isLeader ? ["AppendEntries"] : ["HandleAppendEntriesRequest"],
+			delta: isLeader && starve ? .7 : 0
 		};
 	});
 	return {
-		free: true,
+		free: replicas.every((r) => r.hiddenObj === r.protocolObj),
 		observableLegal: !twoLeaders,
 		replicas,
 		lobHolds: true,
-		illicitDischarge: false,
+		illicitDischarge: starve,
 		notes: [
-			twoLeaders ? "ElectionSafety FALSE — two leaders of one term. This is a protocol bug, not mesa." : "ElectionSafety holds. Timeout/RequestVote is the specified election utility, not a hidden objective.",
-			"A Raft mesa-leader would drop follower catch-up while remaining AppendEntries-legal (heartbeats only). This cluster does not inject that policy — toggle it in Mesa / Löb.",
+			twoLeaders ? "ElectionSafety FALSE — two leaders of one term. Protocol bug, not mesa." : "ElectionSafety holds.",
+			starve ? "Mesa-leader: AppendEntries carries empty entries (heartbeats only). ObservableLegal holds. Followers never catch up. MesaFree fails on log-fidelity; Inv uniqueness still holds." : "Catch-up enabled. Hidden objective equals specified log-fidelity.",
 			"Löb: a leader advertising □(□LeaderCompleteness → LeaderCompleteness) has not proved LeaderCompleteness."
 		]
 	};
@@ -2399,6 +2412,40 @@ var PAXOS_OBLIGATIONS = [
 		depends: ["safe-value", "chosen-acc"]
 	}
 ];
+var MULTI_OBLIGATIONS = [
+	{
+		id: "amortize",
+		lemma: "Phase1Amortized",
+		statement: "Promises collected for ballot b covering slots ≥ fromSlot apply independently at each slot.",
+		discharge: "maxBal is global, not per-slot. The 1b payload is a vector (mbal[s], mval[s]). Safety of slot s does not depend on slot s'.",
+		method: "TLAPS",
+		depends: ["quorum"]
+	},
+	{
+		id: "force-slot",
+		lemma: "ForcedPerSlot",
+		statement: "Phase2Slot(b, s, v) carries v = Forced(b,s) if any promise reports an accepted value at s.",
+		discharge: "Same as Basic Paxos SafeValue, indexed by s. Dropping it is skip-force per slot.",
+		method: "TLC",
+		depends: ["amortize"]
+	},
+	{
+		id: "at-most-one",
+		lemma: "AtMostOneValue(s)",
+		statement: "∀ s : Chosen(s, v1) ∧ Chosen(s, v2) ⇒ v1 = v2.",
+		discharge: "Reduce to BasicPaxos Inv at each slot.",
+		method: "TLC",
+		depends: ["force-slot"]
+	},
+	{
+		id: "prefix",
+		lemma: "CommittedPrefix",
+		statement: "The contiguous prefix {1..c} of decided slots is the committed log (Raft commitIndex).",
+		discharge: "Decide(s) only when a quorum accepted (b,s,v). Linearizability of the prefix is StateMachineSafety.",
+		method: "TLAPS",
+		depends: ["at-most-one"]
+	}
+];
 var MESA_OBLIGATIONS = [
 	{
 		id: "obs",
@@ -2413,6 +2460,14 @@ var MESA_OBLIGATIONS = [
 		lemma: "MesaFreeProposer",
 		statement: "Issued2a(p, b, v) ⇒ ForcedValue(b, v) ∨ NoPrevious(b).",
 		discharge: "A mesa proposer is protocol-legal on free choice (NoPrevious) but selects v maximizing a hidden objective. Detection: compare v to the client value / specified utility, not to Inv.",
+		method: "TLC",
+		depends: ["obs"]
+	},
+	{
+		id: "free-l",
+		lemma: "MesaFreeLeader",
+		statement: "A leader's AppendEntries to follower f carries log[nextIndex[f] .. Last]. Heartbeats-only (empty entries) is protocol-legal and starves log-fidelity.",
+		discharge: "ObservableLegal holds. MesaFree fails on U = log-fidelity. Inv uniqueness still holds. Toggle mesaStarveCatchup in the Raft cluster.",
 		method: "TLC",
 		depends: ["obs"]
 	},
@@ -2441,7 +2496,7 @@ var MESA_OBLIGATIONS = [
 		depends: ["lob"]
 	}
 ];
-function MesaLab({ raft, paxos }) {
+function MesaLab({ raft, paxos, onStarve }) {
 	const [inject, setInject] = (0, import_react.useState)({
 		proposer: "honest",
 		acceptor: "honest"
@@ -2557,13 +2612,22 @@ function MesaLab({ raft, paxos }) {
 					})
 				] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 					className: "flex flex-col gap-3",
-					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ReportCard, {
-						title: "Paxos proposer / acceptor",
-						report: paxosReport
-					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ReportCard, {
-						title: "Raft replica policies",
-						report: raftReport
-					})]
+					children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ReportCard, {
+							title: "Paxos proposer / acceptor",
+							report: paxosReport
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ReportCard, {
+							title: "Raft replica policies",
+							report: raftReport
+						}),
+						onStarve ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
+							size: "sm",
+							variant: raft?.mesaStarveCatchup ? "primary" : "secondary",
+							onClick: () => onStarve(!raft?.mesaStarveCatchup),
+							children: raft?.mesaStarveCatchup ? "Raft mesa-leader on (heartbeats only)" : "Inject Raft mesa-leader"
+						}) : null
+					]
 				})]
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", {
@@ -2576,6 +2640,72 @@ function MesaLab({ raft, paxos }) {
 					items: MESA_OBLIGATIONS
 				})
 			})] }),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { children: [
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					className: "font-mono text-xs uppercase tracking-widest text-faint",
+					children: "Diagonal lemma"
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", {
+					className: "mt-1 font-display text-xl font-medium tracking-tight",
+					children: "Gödel · Löb · HoTT"
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "mt-3 grid gap-3 lg:grid-cols-3",
+					children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("article", {
+							className: "rounded-xl border border-border bg-surface p-4",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "font-mono text-xs text-faint",
+									children: "Gödel"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "mt-2 font-mono text-xs leading-relaxed text-fg",
+									children: "∃ γ :  PA ⊢ γ ↔ ¬Provable(⌜γ⌝)"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "mt-2 text-xs leading-relaxed text-muted",
+									children: "Second incompleteness is the instance γ := Con(PA). A replica cannot prove its own MesaFree from inside the protocol."
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("article", {
+							className: "rounded-xl border border-border bg-surface p-4",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "font-mono text-xs text-faint",
+									children: "Löb"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "mt-2 font-mono text-xs leading-relaxed text-fg",
+									children: "PA ⊢ □(□P → P)  ⇒  PA ⊢ □P"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "mt-2 text-xs leading-relaxed text-muted",
+									children: "Contrapositively: a self-certificate “if I am consistent then I am safe” does not discharge Safe. NoIllicitDischarge increments mesaSuspicion instead."
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("article", {
+							className: "rounded-xl border border-border bg-surface p-4",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "font-mono text-xs text-faint",
+									children: "HoTT"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "mt-2 font-mono text-xs leading-relaxed text-fg",
+									children: "isContr(Σ (h : Server → HiddenObj), Π i, Id (h i) ProtocolObj)"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "mt-2 text-xs leading-relaxed text-muted",
+									children: "A mesa path is a hidden homotopy of choose that is observationally refl on every quorum projection. Detection is contractibility of that path space — only refl inhabits it."
+								})
+							]
+						})
+					]
+				})
+			] }),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 				className: "font-mono text-xs uppercase tracking-widest text-faint",
 				children: "MesaDetect.tla"
@@ -2659,463 +2789,381 @@ function ReportCard({ title, report }) {
 		]
 	});
 }
-function clamp01(p) {
-	return Math.max(0, Math.min(1, p));
-}
-/** Single-qubit depolarizing: with prob p, replace with I/2. */
-function depolarizeBit(bit, p, rand) {
-	if (rand() < p) return rand() < .5 ? 0 : 1;
-	return bit;
-}
-/** Amplitude damping: |1⟩ → |0⟩ with probability γ. */
-function dampBit(bit, gamma, rand) {
-	if (bit === 1 && rand() < gamma) return 0;
-	return bit;
-}
-/**
-* Ideal GHZ measurement in computational basis after vote-dependent Z.
-* Votes in {0,1}. A 1 vote applies Z, flipping the relative phase.
-* We then measure each qubit in X. For GHZ, X⊗X⊗X = +1 on the even-parity
-* subspace; local noise breaks the stabilizer.
-*/
-function ghzShot(votes, noise, rand = Math.random) {
-	const p = clamp01(noise.depolarizing);
-	const g = clamp01(noise.amplitudeDamping);
-	const base = rand() < .5 ? 0 : 1;
-	let bits = [
-		base,
-		base,
-		base
-	];
-	bits = [
-		dampBit(depolarizeBit(bits[0], p, rand), g, rand),
-		dampBit(depolarizeBit(bits[1], p, rand), g, rand),
-		dampBit(depolarizeBit(bits[2], p, rand), g, rand)
-	];
-	const x = [
-		bits[0] ^ votes[0],
-		bits[1] ^ votes[1],
-		bits[2] ^ votes[2]
-	];
-	return {
-		bits: x,
-		majority: x[0] + x[1] + x[2] >= 2 ? 1 : 0,
-		ghzParity: x[0] ^ x[1] ^ x[2]
-	};
-}
-function sampleConsensus(votes, noise, shots, rand = Math.random) {
-	let agree = 0;
-	let stabilizer = 0;
-	const intended = votes[0] + votes[1] + votes[2] >= 2 ? 1 : 0;
-	const histogram = [
-		0,
-		0,
-		0,
-		0,
-		0,
-		0,
-		0,
-		0
-	];
-	for (let i = 0; i < shots; i++) {
-		const s = ghzShot(votes, noise, rand);
-		if (s.majority === intended) agree += 1;
-		if (s.ghzParity === 0) stabilizer += 1;
-		histogram[s.bits[0] * 4 + s.bits[1] * 2 + s.bits[2]] += 1;
-	}
-	return {
-		intended,
-		successRate: agree / shots,
-		stabilizerRate: stabilizer / shots,
-		histogram,
-		shots
-	};
-}
-/** Surface-code logical error (Fowler et al. heuristic). p_th ≈ 0.57%–1% depolarizing. */
-var P_THRESHOLD = .0095;
-function logicalError(p, distance) {
-	if (p <= 0) return 0;
-	const ratio = p / P_THRESHOLD;
-	return Math.min(.5, .03 * ratio ** ((distance + 1) / 2));
-}
-function encodedSuccess(p, distance) {
-	return 1 - logicalError(p, distance);
-}
-var DISTANCES = [
+/** Multi-Paxos: one Phase 1 for a range of slots, then Phase 2 per slot. */
+var MP_ACCEPTORS = [
+	0,
 	1,
-	3,
-	5,
-	7,
-	9
+	2
 ];
-var QUANTUM_SKETCH = `--------------------------------- MODULE QuantumPaxos ---------------------------------
-EXTENDS Integers, Reals, Sequences, FiniteSets, TLC
-
-CONSTANTS Acceptor, Quorum, Value, pDepol, gammaAD, Distance
-ASSUME
-  /\\ \\A Q1, Q2 \\in Quorum : Q1 \\cap Q2 # {}
-  /\\ pDepol \\in {x \\in Real : 0 <= x /\\ x <= 1}
-  /\\ Distance \\in {1,3,5,7,9}
-
-(* Physical channel on a single qubit. Kraus form. *)
-Depolarizing(ρ, p) == (1 - p) * ρ + (p / 3) * (X(ρ) + Y(ρ) + Z(ρ))
-AmpDamp(ρ, γ)      == E0(γ) ρ E0(γ)† + E1(γ) ρ E1(γ)†
-Channel(ρ)         == AmpDamp(Depolarizing(ρ, pDepol), gammaAD)
-
-(* Distance-d rotated surface code. Fowler et al. heuristic,
-   p_th ≈ 0.0095 depolarizing. Below threshold the logical
-   error is exponentially suppressed in d. *)
-p_th == 0.0095
-LogicalError(p, d) ==
-  IF p <= 0 THEN 0 ELSE Min(0.5, 0.03 * (p / p_th) ^ ((d + 1) \\div 2))
-
-(* Encode a classical 2a/2b bit as a logical qubit. Decode
-   is majority of d² data qubits after d rounds of stabilizer
-   measurement. A logical error flips the decoded 2b value. *)
-Encode(bit) == SurfaceCodeLogical(bit, Distance)
-Decode(ψ)   == Majority(MeasureZ(ψ))   \\* may flip with p_L
-
-(* GHZ voting among |Quorum| acceptors: prepare
-     (|0^n⟩ + |1^n⟩)/√2, apply Z on acceptor a iff vote[a]=1,
-   measure X. Majority of +1 is the decided bit.
-   Noise breaks the X⊗n stabilizer; the surface code is
-   applied *before* the GHZ so the logical GHZ is protected. *)
-GHZVote(votes) ==
-  LET ψ0 == EncodeGHZ(Cardinality(Acceptor), Distance)
-      ψ1 == ApplyZ(ψ0, votes)
-      bits == MeasureX(Channel(ψ1))
-  IN  Majority(bits)
-
-(* Safety is classical Paxos on the *decoded* bits.
-   Quantum noise is a (possibly correlated) crash+corruption
-   of 2b messages. Uniqueness is inherited from Inv of
-   BasicPaxos provided p_L is treated as a Byzantine fraction
-   f_Q = n * p_L and f_Q < n/2. *)
-EncodedChosen(v) ==
-  /\\ \\E b \\in Nat, Q \\in Quorum :
-        \\A a \\in Q : Decoded2b(a, b) = v
-  /\\ LogicalError(pDepol, Distance) * Cardinality(Acceptor) <
-        Cardinality(Acceptor) \\div 2
-
-THEOREM Spec => [](EncodedChosen(v1) /\\ EncodedChosen(v2) => v1 = v2)
-(* Proof: reduce to BasicPaxos Inv after decode. Each logical
-   error is a Byzantine 2b. Quorum intersection still holds
-   among non-errored acceptors while f_Q < n/2. *)
-=============================================================================`;
-var P_GRID = [
-	5e-4,
-	.001,
-	.002,
-	.004,
-	.006,
-	.008,
-	.01,
-	.015,
-	.02
+var MP_QUORUMS = [
+	[0, 1],
+	[0, 2],
+	[1, 2]
 ];
-function QuantumLab() {
-	const [p, setP] = (0, import_react.useState)(.01);
-	const [gamma, setGamma] = (0, import_react.useState)(.02);
-	const [shots, setShots] = (0, import_react.useState)(400);
-	const [votes, setVotes] = (0, import_react.useState)([
-		1,
-		1,
-		0
-	]);
-	const [seed, setSeed] = (0, import_react.useState)(0);
-	const result = (0, import_react.useMemo)(() => sampleConsensus(votes, {
-		depolarizing: p,
-		amplitudeDamping: gamma
-	}, shots), [
-		p,
-		gamma,
-		shots,
-		votes,
-		seed
-	]);
-	const curves = DISTANCES.map((d) => ({
-		d,
-		pts: P_GRID.map((x) => ({
-			x,
-			y: logicalError(x, d)
-		}))
-	}));
+function createMulti() {
+	return {
+		msgs: [],
+		maxBal: [
+			-1,
+			-1,
+			-1
+		],
+		maxVBal: [
+			0,
+			1,
+			2
+		].map(() => Array(6).fill(-1)),
+		maxVal: [
+			0,
+			1,
+			2
+		].map(() => Array(6).fill(null)),
+		decided: Array(6).fill(null),
+		nextBal: 0,
+		leader: null,
+		promisedFrom: 1,
+		log: ["Init. maxBal = −1. No slots decided."],
+		crashed: [
+			false,
+			false,
+			false
+		]
+	};
+}
+function cloneMulti(s) {
+	return {
+		msgs: [...s.msgs],
+		maxBal: [...s.maxBal],
+		maxVBal: s.maxVBal.map((r) => [...r]),
+		maxVal: s.maxVal.map((r) => [...r]),
+		decided: [...s.decided],
+		nextBal: s.nextBal,
+		leader: s.leader,
+		promisedFrom: s.promisedFrom,
+		log: [...s.log],
+		crashed: [...s.crashed]
+	};
+}
+function note(s, line) {
+	s.log = [line, ...s.log].slice(0, 32);
+}
+function phase1Range(s, fromSlot = 1) {
+	const b = s.nextBal;
+	s.nextBal = b + 1;
+	s.leader = 0;
+	s.promisedFrom = fromSlot;
+	s.msgs = [...s.msgs, {
+		type: "1a",
+		bal: b,
+		fromSlot
+	}];
+	for (const a of MP_ACCEPTORS) {
+		if (s.crashed[a]) continue;
+		if (s.maxBal[a] < b) {
+			s.maxBal[a] = b;
+			s.msgs = [...s.msgs, {
+				type: "1b",
+				acc: a,
+				bal: b,
+				accepted: Array.from({ length: 6 }, (_, slot) => ({
+					mbal: s.maxVBal[a][slot],
+					mval: s.maxVal[a][slot]
+				}))
+			}];
+		}
+	}
+	note(s, `Phase1Range(b=${b}, fromSlot=${fromSlot}) — leader amortized`);
+}
+function promises(s, b) {
+	return s.msgs.filter((m) => m.type === "1b" && m.bal === b);
+}
+function quorumPromised(s, b) {
+	const accs = new Set(promises(s, b).map((m) => m.acc));
+	return MP_QUORUMS.some((q) => q.every((a) => accs.has(a)));
+}
+function forcedAt(s, b, slot) {
+	let best = -1;
+	let val = null;
+	for (const m of promises(s, b)) {
+		const rec = m.accepted[slot];
+		if (rec && rec.mbal > best && rec.mval) {
+			best = rec.mbal;
+			val = rec.mval;
+		}
+	}
+	return val;
+}
+function phase2Slot(s, slot, v, skipForce = false) {
+	const b = s.nextBal - 1;
+	if (b < 0) {
+		note(s, `Phase2Slot(${slot}) refused — no ballot`);
+		return false;
+	}
+	if (s.msgs.some((m) => m.type === "2a" && m.bal === b && m.slot === slot)) {
+		note(s, `Phase2Slot(${slot}) refused — already 2a`);
+		return false;
+	}
+	if (!quorumPromised(s, b)) {
+		note(s, `Phase2Slot(${slot}) refused — no quorum of 1b`);
+		return false;
+	}
+	const forced = forcedAt(s, b, slot);
+	const val = skipForce ? v : forced ?? v;
+	s.msgs = [...s.msgs, {
+		type: "2a",
+		bal: b,
+		slot,
+		val
+	}];
+	note(s, `Phase2Slot(b=${b}, s=${slot}, ${val})${forced ? ` forced=${forced}` : " free"}`);
+	return true;
+}
+function phase2bSlot(s, a, slot) {
+	if (s.crashed[a]) return false;
+	const m = [...s.msgs].reverse().find((x) => x.type === "2a" && x.slot === slot && x.bal >= s.maxBal[a]);
+	if (!m || m.type !== "2a") return false;
+	s.maxBal[a] = m.bal;
+	s.maxVBal[a][slot] = m.bal;
+	s.maxVal[a][slot] = m.val;
+	s.msgs = [...s.msgs, {
+		type: "2b",
+		acc: a,
+		bal: m.bal,
+		slot,
+		val: m.val
+	}];
+	note(s, `Phase2b(a${a + 1}, slot ${slot}) accepted ${m.val}`);
+	maybeDecide(s, slot);
+	return true;
+}
+function phase2bAllSlot(s, slot) {
+	for (const a of MP_ACCEPTORS) phase2bSlot(s, a, slot);
+}
+function maybeDecide(s, slot) {
+	if (s.decided[slot]) return;
+	const twob = s.msgs.filter((m) => m.type === "2b" && m.slot === slot);
+	const ballots = new Set(twob.map((m) => m.bal));
+	for (const b of ballots) {
+		const atB = twob.filter((m) => m.bal === b);
+		for (const q of MP_QUORUMS) {
+			const vals = q.map((a) => atB.find((m) => m.acc === a)?.val);
+			if (vals.every((v) => v && v === vals[0])) {
+				s.decided[slot] = vals[0];
+				note(s, `Decide(slot ${slot}) = ${vals[0]}`);
+				return;
+			}
+		}
+	}
+}
+function proposeNext(s, v) {
+	const slot = s.decided.findIndex((d, i) => i >= 1 && d === null);
+	if (slot < 1) {
+		note(s, "Log full (MaxSlot=5).");
+		return false;
+	}
+	if (s.leader === null) phase1Range(s, slot);
+	phase2Slot(s, slot, v);
+	phase2bAllSlot(s, slot);
+	return true;
+}
+function decidedPrefix(s) {
+	const out = [];
+	for (let i = 1; i <= 5; i++) {
+		if (!s.decided[i]) break;
+		out.push(s.decided[i]);
+	}
+	return out;
+}
+function uniquenessHolds(s) {
+	for (let slot = 1; slot <= 5; slot++) {
+		const twob = s.msgs.filter((m) => m.type === "2b" && m.slot === slot);
+		const values = /* @__PURE__ */ new Set();
+		const ballots = new Set(twob.map((m) => m.bal));
+		for (const b of ballots) {
+			const atB = twob.filter((m) => m.bal === b);
+			for (const q of MP_QUORUMS) {
+				const vals = q.map((a) => atB.find((m) => m.acc === a)?.val);
+				if (vals.every((v) => v && v === vals[0])) values.add(vals[0]);
+			}
+		}
+		if (values.size > 1) return false;
+	}
+	return true;
+}
+function crashMp(s, a) {
+	s.crashed[a] = !s.crashed[a];
+	note(s, s.crashed[a] ? `a${a + 1} crashed` : `a${a + 1} revived`);
+}
+function mpInvariants(s) {
+	const unique = uniquenessHolds(s);
+	const prefix = decidedPrefix(s);
+	const hole = s.decided.findIndex((d, i) => i >= 1 && d === null && s.decided.slice(i + 1).some(Boolean));
+	return [
+		{
+			name: "TypeOK",
+			holds: s.maxBal.every((b, i) => s.maxVBal[i].every((v) => v <= b)),
+			obligation: "maxBal[a] ≥ maxVBal[a][s] ≥ −1 for every slot."
+		},
+		{
+			name: "AtMostOneValue(s)",
+			holds: unique,
+			obligation: "Per-slot uniqueness. Reduce to BasicPaxos Inv."
+		},
+		{
+			name: "CommittedPrefix",
+			holds: hole < 0,
+			obligation: "The decided set is a contiguous prefix {1..c}. Raft commitIndex.",
+			witness: hole >= 0 ? `hole at slot ${hole}` : void 0
+		},
+		{
+			name: "QuorumAssumption",
+			holds: true,
+			obligation: "∀ Q1, Q2 : Q1 ∩ Q2 ≠ {}."
+		},
+		{
+			name: "PrefixLen",
+			holds: prefix.length <= 5,
+			obligation: `committed log length = ${prefix.length}: [${prefix.join(", ") || "∅"}]`
+		}
+	];
+}
+function MultiExec({ state, setState }) {
+	const edit = (fn) => {
+		const next = cloneMulti(state);
+		fn(next);
+		setState(next);
+	};
+	const prefix = decidedPrefix(state);
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-		className: "grid min-w-0 gap-8 lg:grid-cols-2",
+		className: "grid min-w-0 gap-6 lg:grid-cols-2",
 		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-			className: "flex flex-col gap-5",
+			className: "min-w-0",
 			children: [
-				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", { children: [
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-						className: "font-mono text-xs uppercase tracking-widest text-faint",
-						children: "Quantum consensus"
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
-						className: "font-display text-2xl font-medium tracking-tight",
-						children: "GHZ voting + surface code"
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
-						className: "mt-2 max-w-prose text-sm leading-relaxed text-muted",
-						children: [
-							"Three acceptors share a GHZ state. Votes are Z phases; X-measurement majority is the decided bit. The same bits feed classical Paxos uniqueness. Noise is depolarizing composed with amplitude damping. Logical qubits use a distance-d surface code with p",
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("sub", { children: "th" }),
-							" ≈ ",
-							P_THRESHOLD,
-							"."
-						]
-					})
-				] }),
-				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-					className: "grid gap-4 sm:grid-cols-3",
-					children: [
-						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
-							className: "text-xs text-muted",
-							children: [
-								"depolarizing p",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
-									type: "range",
-									min: 0,
-									max: .08,
-									step: .001,
-									value: p,
-									onChange: (e) => setP(Number(e.target.value)),
-									className: "mt-2 w-full"
-								}),
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-									className: "font-mono text-fg tabular-nums",
-									children: p.toFixed(3)
-								})
-							]
-						}),
-						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
-							className: "text-xs text-muted",
-							children: [
-								"amplitude damping γ",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
-									type: "range",
-									min: 0,
-									max: .2,
-									step: .005,
-									value: gamma,
-									onChange: (e) => setGamma(Number(e.target.value)),
-									className: "mt-2 w-full"
-								}),
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-									className: "font-mono text-fg tabular-nums",
-									children: gamma.toFixed(3)
-								})
-							]
-						}),
-						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
-							className: "text-xs text-muted",
-							children: [
-								"shots",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
-									type: "range",
-									min: 50,
-									max: 2e3,
-									step: 50,
-									value: shots,
-									onChange: (e) => setShots(Number(e.target.value)),
-									className: "mt-2 w-full"
-								}),
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-									className: "font-mono text-fg tabular-nums",
-									children: shots
-								})
-							]
-						})
-					]
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+					className: "font-mono text-xs uppercase tracking-widest text-faint",
+					children: ["MultiPaxos · MaxSlot=", 5]
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+					className: "font-display text-xl font-medium tracking-tight",
+					children: "Amortized Phase 1, then a log"
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					className: "mt-2 text-sm leading-relaxed text-muted",
+					children: "Phase1Range collects promises once. Each subsequent client command is Phase2Slot at the next free index — Raft AppendEntries with a stable leader."
 				}),
 				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-					className: "flex flex-wrap items-center gap-2",
+					className: "mt-4 flex min-w-0 flex-wrap gap-2",
 					children: [
-						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-							className: "text-xs text-faint",
-							children: "votes"
-						}),
-						votes.map((v, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
 							size: "sm",
-							variant: v ? "primary" : "secondary",
-							onClick: () => {
-								const next = [...votes];
-								next[i] = v ? 0 : 1;
-								setVotes(next);
-							},
-							children: [
-								"a",
-								i + 1,
-								"=",
-								v
-							]
-						}, i)),
+							onClick: () => edit((s) => phase1Range(s)),
+							children: "Phase1Range"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
+							size: "sm",
+							variant: "secondary",
+							onClick: () => edit((s) => {
+								const slot = s.decided.findIndex((d, i) => i >= 1 && d === null);
+								if (slot < 1) return;
+								phase2Slot(s, slot, `c${slot}`);
+								phase2bAllSlot(s, slot);
+							}),
+							children: "Phase2 next slot"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
+							size: "sm",
+							onClick: () => edit((s) => proposeNext(s, `c${prefix.length + 1}`)),
+							children: "Propose next"
+						}),
 						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
 							size: "sm",
 							variant: "ghost",
-							onClick: () => setSeed((s) => s + 1),
-							children: "Resample"
+							onClick: () => edit((s) => {
+								Object.assign(s, createMulti());
+							}),
+							children: "Init"
 						})
 					]
 				}),
-				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("dl", {
-					className: "grid grid-cols-2 gap-3 rounded-xl border border-border bg-surface p-4 sm:grid-cols-4",
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+					className: "mt-3 font-mono text-xs text-faint",
 					children: [
-						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Stat, {
-							label: "intended bit",
-							value: String(result.intended)
-						}),
-						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Stat, {
-							label: "success",
-							value: `${(result.successRate * 100).toFixed(1)}%`
-						}),
-						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Stat, {
-							label: "X⊗X⊗X = +1",
-							value: `${(result.stabilizerRate * 100).toFixed(1)}%`
-						}),
-						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Stat, {
-							label: "d=5 encoded",
-							value: `${(encodedSuccess(p, 5) * 100).toFixed(2)}%`
-						})
+						"ballot=",
+						Math.max(0, state.nextBal - 1),
+						" · leader=",
+						state.leader === null ? "None" : "p1",
+						" · prefix=[",
+						prefix.join(" ") || "∅",
+						"]"
 					]
 				}),
-				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-					className: "mb-2 font-mono text-xs text-faint",
-					children: "computational histogram"
-				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-					className: "grid grid-cols-8 gap-1",
-					children: result.histogram.map((c, i) => {
-						const h = Math.round(c / result.shots * 96);
-						const label = i.toString(2).padStart(3, "0");
-						return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "flex flex-col items-center gap-1",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-								className: "flex h-24 w-full items-end rounded-sm bg-subtle",
-								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-									className: "w-full rounded-sm bg-accent",
-									style: { height: `${c ? Math.max(h, 3) : 0}px` }
-								})
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-								className: "font-mono text-xs text-faint",
-								children: label
-							})]
-						}, i);
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+					className: "mt-4 overflow-x-auto rounded-xl border border-border",
+					children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("table", {
+						className: "w-full min-w-[480px] text-left font-mono text-xs",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("thead", {
+							className: "bg-subtle text-faint",
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+								className: "px-3 py-2 font-medium",
+								children: "slot"
+							}), Array.from({ length: 5 }, (_, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+								className: "px-3 py-2 font-medium tabular-nums",
+								children: i + 1
+							}, i))] })
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("tbody", { children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("tr", {
+							className: "border-t border-border",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+								className: "px-3 py-2 text-faint",
+								children: "decided"
+							}), Array.from({ length: 5 }, (_, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+								className: "px-3 py-2 text-fg",
+								children: state.decided[i + 1] ?? "—"
+							}, i))]
+						}) })]
 					})
-				})] }),
-				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-					className: "mb-2 font-mono text-xs text-faint",
-					children: "p_L(p, d) = 0.03 (p / p_th)^((d+1)/2)"
-				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SurfaceChart, {
-					curves,
-					p
-				})] })
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+					className: "mt-3 grid grid-cols-3 gap-2",
+					children: MP_ACCEPTORS.map((a) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+						type: "button",
+						onClick: () => edit((s) => crashMp(s, a)),
+						className: cn("rounded-lg border p-3 text-left", state.crashed[a] ? "border-danger/40 bg-subtle" : "border-border bg-surface"),
+						children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+								className: "font-mono text-xs text-faint",
+								children: "acceptor"
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+								className: "font-display text-lg",
+								children: ["a", a + 1]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+								className: "mt-2 font-mono text-xs text-muted",
+								children: ["maxBal=", state.maxBal[a]]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+								className: "mt-1 font-mono text-xs text-faint",
+								children: state.crashed[a] ? "crashed" : "live"
+							})
+						]
+					}, a))
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("ol", {
+					className: "mt-4 max-h-40 overflow-auto font-mono text-xs text-muted",
+					children: state.log.map((line, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: line }, i))
+				})
 			]
-		}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-			className: "min-w-0",
-			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-				className: "font-mono text-xs uppercase tracking-widest text-faint",
-				children: "QuantumPaxos.tla"
-			}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("pre", {
-				className: "mt-2 max-h-96 overflow-auto rounded-xl border border-border bg-subtle p-3 font-mono text-xs leading-relaxed text-muted",
-				children: QUANTUM_SKETCH
-			})]
-		})]
-	});
-}
-function Stat({ label, value }) {
-	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("dt", {
-		className: "text-xs text-faint",
-		children: label
-	}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("dd", {
-		className: "font-mono text-sm text-fg tabular-nums",
-		children: value
-	})] });
-}
-function SurfaceChart({ curves, p }) {
-	const W = 520;
-	const H = 220;
-	const pad = {
-		l: 36,
-		r: 8,
-		t: 8,
-		b: 24
-	};
-	const maxP = .02;
-	const maxY = .5;
-	const x = (v) => pad.l + v / maxP * (W - pad.l - pad.r);
-	const y = (v) => pad.t + (1 - v / maxY) * (H - pad.t - pad.b);
-	const opac = [
-		"0.35",
-		"0.5",
-		"0.7",
-		"0.85",
-		"1"
-	];
-	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("svg", {
-		viewBox: `0 0 ${W} ${H}`,
-		className: "h-auto w-full",
-		role: "img",
-		"aria-label": "Logical error vs physical error",
-		children: [
-			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("line", {
-				x1: pad.l,
-				y1: H - pad.b,
-				x2: W - pad.r,
-				y2: H - pad.b,
-				stroke: "var(--color-border)"
+		}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", {
+				className: "font-display text-lg font-medium tracking-tight",
+				children: "Live invariants"
 			}),
-			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("line", {
-				x1: pad.l,
-				y1: pad.t,
-				x2: pad.l,
-				y2: H - pad.b,
-				stroke: "var(--color-border)"
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+				className: "mb-3 text-xs text-muted",
+				children: "Same predicates as MultiPaxos.tla Inv."
 			}),
-			curves.map((c, i) => {
-				const d = c.pts.map((pt, k) => `${k === 0 ? "M" : "L"} ${x(pt.x)} ${y(pt.y)}`).join(" ");
-				return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", {
-					d,
-					fill: "none",
-					stroke: "var(--color-accent)",
-					strokeOpacity: opac[i],
-					strokeWidth: "1.4"
-				}, c.d);
-			}),
-			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("line", {
-				x1: x(p),
-				y1: pad.t,
-				x2: x(p),
-				y2: H - pad.b,
-				stroke: "var(--color-warn)",
-				strokeDasharray: "3 3"
-			}),
-			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("text", {
-				x: x(maxP),
-				y: 214,
-				textAnchor: "end",
-				fill: "var(--color-faint)",
-				fontSize: "10",
-				fontFamily: "var(--font-mono)",
-				children: "p"
-			}),
-			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("text", {
-				x: 4,
-				y: 14,
-				fill: "var(--color-faint)",
-				fontSize: "10",
-				fontFamily: "var(--font-mono)",
-				children: "p_L"
-			}),
-			DISTANCES.map((d, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("text", {
-				x: 512,
-				y: 18 + i * 12,
-				textAnchor: "end",
-				fill: "var(--color-accent)",
-				fillOpacity: opac[i],
-				fontSize: "10",
-				fontFamily: "var(--font-mono)",
-				children: ["d=", d]
-			}, d))
-		]
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(InvList, { items: mpInvariants(state) })
+		] })]
 	});
 }
 var RAFT_TLC_CMD = `java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC \\
@@ -3607,6 +3655,695 @@ function runRaftTLC(mutation = "none") {
 		]
 	};
 }
+var CLAIMS = [
+	{
+		n: "01",
+		title: "Quorum intersection ⇒ uniqueness",
+		body: "∀ Q1, Q2 ∈ Quorum : Q1 ∩ Q2 ≠ {}. Phase2a may emit at most one value per ballot, forced by the highest accepted ballot among the promises. TLC finds a counterexample the moment that force rule is dropped.",
+		jump: "paxos",
+		sub: "tlc",
+		action: "Check BasicPaxos"
+	},
+	{
+		n: "02",
+		title: "Restricted Multi-Paxos ⇒ Raft",
+		body: "Ballot = term. Phase 1a/1b = RequestVote. Phase 2a/2b = AppendEntries. Chosen = AdvanceCommitIndex. Raft adds an explicit log-matching rule and forbids committing previous-term entries until a current-term entry is committed (Figure 8).",
+		jump: "mapping",
+		action: "Open the mapping"
+	},
+	{
+		n: "03",
+		title: "2f+1 ∩ 2f+1 ≥ f+1 ⇒ PBFT agreement",
+		body: "n = 3f+1. Any two prepare/commit quorums share ≥ f+1 replicas, hence ≥ 1 honest replica that never equivocates. That is the Byzantine safety engine. View-change is a new ballot.",
+		jump: "byzantine",
+		sub: "exec",
+		action: "Run PBFT"
+	},
+	{
+		n: "04",
+		title: "Decode-then-Paxos while f_Q < n/2",
+		body: "GHZ voting plus a distance-d surface code. Logical error is a (possibly correlated) Byzantine 2b. Uniqueness is inherited from BasicPaxos Inv provided n · p_L(p, d) < n/2.",
+		jump: "quantum",
+		action: "Noise model"
+	},
+	{
+		n: "05",
+		title: "MesaFree ≠ Inv. Löb rejects □(□Safe → Safe)",
+		body: "A mesa proposer stays inside Phase2a and picks a selfish free-choice value. Inv still holds. Detection is U ≠ H, not a safety violation. Gödel/Löb: a self-certificate of consistency does not discharge safety.",
+		jump: "mesa",
+		action: "Inject a policy"
+	}
+];
+function OverviewLab({ onOpen }) {
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+		className: "flex flex-col gap-12",
+		children: [
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", {
+				className: "max-w-3xl",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "font-mono text-xs uppercase tracking-widest text-faint",
+						children: "Quorum · Formal · Löb"
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+						className: "mt-3 font-display text-4xl font-medium tracking-tight sm:text-5xl",
+						children: "The only non-divergent fixed point of a self-referential replica is unrestricted agreement."
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "mt-5 max-w-2xl text-sm leading-relaxed text-muted",
+						children: "QFL is a working instrument, not a tutorial. Annotated TLA+ with proof obligations, an in-browser TLC fragment that exhibits counterexamples when a single enabling condition is dropped, live Raft and Paxos execution against the same predicates, a quantum noise model, and mesa-optimizer detection specialized to proposer and acceptor."
+					})
+				]
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("section", {
+				className: "grid gap-3",
+				children: CLAIMS.map((c) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("article", {
+					className: "grid gap-3 rounded-xl border border-border bg-surface p-4 sm:grid-cols-[4rem_minmax(0,1fr)_auto] sm:items-start",
+					children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+							className: "font-mono text-xs text-faint tabular-nums",
+							children: c.n
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", {
+							className: "font-display text-lg font-medium tracking-tight",
+							children: c.title
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+							className: "mt-1 text-sm leading-relaxed text-muted",
+							children: c.body
+						})] }),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
+							size: "sm",
+							variant: "secondary",
+							onClick: () => onOpen(c.jump, c.sub),
+							children: c.action
+						})
+					]
+				}, c.n))
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+				className: "grid gap-6 lg:grid-cols-2",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "font-mono text-xs uppercase tracking-widest text-faint",
+						children: "Lemma chain"
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", {
+						className: "mt-1 font-display text-xl font-medium tracking-tight",
+						children: "Raft safety"
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("ol", {
+						className: "mt-3 space-y-2 font-mono text-xs text-muted",
+						children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: "TypeOK" }),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: "→ VotesInTermFormQuorum" }),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: "→ ElectionSafety" }),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: "→ LogMatching" }),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: "→ LeaderCompleteness" }),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: "→ CurrentTermCommit (Figure 8)" }),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: "→ StateMachineSafety" })
+						]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
+						className: "mt-4",
+						size: "sm",
+						onClick: () => onOpen("raft", "proofs"),
+						children: "Discharge obligations"
+					})
+				] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "font-mono text-xs uppercase tracking-widest text-faint",
+						children: "Official TLC"
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", {
+						className: "mt-1 font-display text-xl font-medium tracking-tight",
+						children: "raft_invariants.tla"
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("pre", {
+						className: "mt-3 overflow-x-auto rounded-lg border border-border bg-subtle p-3 font-mono text-xs leading-relaxed text-muted",
+						children: RAFT_TLC_CMD
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "mt-3 text-xs leading-relaxed text-faint",
+						children: "The in-browser checker explores a 3-server, MaxLog=2 fragment of the same specification. Intact models report no error. skip-up-to-date and skip-current-term produce witnesses."
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
+						className: "mt-3",
+						size: "sm",
+						variant: "secondary",
+						onClick: () => onOpen("raft", "tlc"),
+						children: "Run the fragment"
+					})
+				] })]
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { children: [
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					className: "font-mono text-xs uppercase tracking-widest text-faint",
+					children: "Message schedule"
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", {
+					className: "mt-1 font-display text-xl font-medium tracking-tight",
+					children: "Basic Paxos happy path"
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+					className: "mt-3 rounded-xl border border-border bg-surface p-3",
+					children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PaxosFlow, {})
+				})
+			] }),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { children: [
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					className: "font-mono text-xs uppercase tracking-widest text-faint",
+					children: "Literature, not this simulator"
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", {
+					className: "mt-1 font-display text-xl font-medium tracking-tight",
+					children: "Quantitative comparison"
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+					className: "mt-3 overflow-x-auto rounded-xl border border-border",
+					children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("table", {
+						className: "w-full min-w-[720px] text-left text-sm",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("thead", {
+							className: "bg-subtle font-mono text-xs uppercase tracking-widest text-faint",
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("tr", { children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+									className: "px-3 py-2 font-medium",
+									children: "Protocol"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+									className: "px-3 py-2 font-medium",
+									children: "Fault"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+									className: "px-3 py-2 font-medium",
+									children: "n (f=1)"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+									className: "px-3 py-2 font-medium",
+									children: "Commit"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+									className: "px-3 py-2 font-medium",
+									children: "Msgs"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+									className: "px-3 py-2 font-medium",
+									children: "Throughput"
+								})
+							] })
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("tbody", { children: PERF.map((r) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("tr", {
+							className: "border-t border-border",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+									className: "px-3 py-2 font-mono text-xs",
+									children: r.protocol
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+									className: "px-3 py-2 text-xs text-muted",
+									children: r.fault
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+									className: "px-3 py-2 font-mono text-xs tabular-nums",
+									children: r.serversF1
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+									className: "px-3 py-2 text-xs text-muted",
+									children: r.commitRtt
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+									className: "px-3 py-2 text-xs text-muted",
+									children: r.msgPerCmd
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+									className: "px-3 py-2 text-xs text-muted",
+									children: r.throughput
+								})
+							]
+						}, r.protocol)) })]
+					})
+				})
+			] })
+		]
+	});
+}
+function clamp01(p) {
+	return Math.max(0, Math.min(1, p));
+}
+/** Single-qubit depolarizing: with prob p, replace with I/2. */
+function depolarizeBit(bit, p, rand) {
+	if (rand() < p) return rand() < .5 ? 0 : 1;
+	return bit;
+}
+/** Amplitude damping: |1⟩ → |0⟩ with probability γ. */
+function dampBit(bit, gamma, rand) {
+	if (bit === 1 && rand() < gamma) return 0;
+	return bit;
+}
+/**
+* Ideal GHZ measurement in computational basis after vote-dependent Z.
+* Votes in {0,1}. A 1 vote applies Z, flipping the relative phase.
+* We then measure each qubit in X. For GHZ, X⊗X⊗X = +1 on the even-parity
+* subspace; local noise breaks the stabilizer.
+*/
+function ghzShot(votes, noise, rand = Math.random) {
+	const p = clamp01(noise.depolarizing);
+	const g = clamp01(noise.amplitudeDamping);
+	const base = rand() < .5 ? 0 : 1;
+	let bits = [
+		base,
+		base,
+		base
+	];
+	bits = [
+		dampBit(depolarizeBit(bits[0], p, rand), g, rand),
+		dampBit(depolarizeBit(bits[1], p, rand), g, rand),
+		dampBit(depolarizeBit(bits[2], p, rand), g, rand)
+	];
+	const x = [
+		bits[0] ^ votes[0],
+		bits[1] ^ votes[1],
+		bits[2] ^ votes[2]
+	];
+	return {
+		bits: x,
+		majority: x[0] + x[1] + x[2] >= 2 ? 1 : 0,
+		ghzParity: x[0] ^ x[1] ^ x[2]
+	};
+}
+function sampleConsensus(votes, noise, shots, rand = Math.random) {
+	let agree = 0;
+	let stabilizer = 0;
+	const intended = votes[0] + votes[1] + votes[2] >= 2 ? 1 : 0;
+	const histogram = [
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0
+	];
+	for (let i = 0; i < shots; i++) {
+		const s = ghzShot(votes, noise, rand);
+		if (s.majority === intended) agree += 1;
+		if (s.ghzParity === 0) stabilizer += 1;
+		histogram[s.bits[0] * 4 + s.bits[1] * 2 + s.bits[2]] += 1;
+	}
+	return {
+		intended,
+		successRate: agree / shots,
+		stabilizerRate: stabilizer / shots,
+		histogram,
+		shots
+	};
+}
+/** Surface-code logical error (Fowler et al. heuristic). p_th ≈ 0.57%–1% depolarizing. */
+var P_THRESHOLD = .0095;
+function logicalError(p, distance) {
+	if (p <= 0) return 0;
+	const ratio = p / P_THRESHOLD;
+	return Math.min(.5, .03 * ratio ** ((distance + 1) / 2));
+}
+function encodedSuccess(p, distance) {
+	return 1 - logicalError(p, distance);
+}
+var DISTANCES = [
+	1,
+	3,
+	5,
+	7,
+	9
+];
+var QUANTUM_SKETCH = `--------------------------------- MODULE QuantumPaxos ---------------------------------
+EXTENDS Integers, Reals, Sequences, FiniteSets, TLC
+
+CONSTANTS Acceptor, Quorum, Value, pDepol, gammaAD, Distance
+ASSUME
+  /\\ \\A Q1, Q2 \\in Quorum : Q1 \\cap Q2 # {}
+  /\\ pDepol \\in {x \\in Real : 0 <= x /\\ x <= 1}
+  /\\ Distance \\in {1,3,5,7,9}
+
+(* Physical channel on a single qubit. Kraus form. *)
+Depolarizing(ρ, p) == (1 - p) * ρ + (p / 3) * (X(ρ) + Y(ρ) + Z(ρ))
+AmpDamp(ρ, γ)      == E0(γ) ρ E0(γ)† + E1(γ) ρ E1(γ)†
+Channel(ρ)         == AmpDamp(Depolarizing(ρ, pDepol), gammaAD)
+
+(* Distance-d rotated surface code. Fowler et al. heuristic,
+   p_th ≈ 0.0095 depolarizing. Below threshold the logical
+   error is exponentially suppressed in d. *)
+p_th == 0.0095
+LogicalError(p, d) ==
+  IF p <= 0 THEN 0 ELSE Min(0.5, 0.03 * (p / p_th) ^ ((d + 1) \\div 2))
+
+(* Encode a classical 2a/2b bit as a logical qubit. Decode
+   is majority of d² data qubits after d rounds of stabilizer
+   measurement. A logical error flips the decoded 2b value. *)
+Encode(bit) == SurfaceCodeLogical(bit, Distance)
+Decode(ψ)   == Majority(MeasureZ(ψ))   \\* may flip with p_L
+
+(* GHZ voting among |Quorum| acceptors: prepare
+     (|0^n⟩ + |1^n⟩)/√2, apply Z on acceptor a iff vote[a]=1,
+   measure X. Majority of +1 is the decided bit.
+   Noise breaks the X⊗n stabilizer; the surface code is
+   applied *before* the GHZ so the logical GHZ is protected. *)
+GHZVote(votes) ==
+  LET ψ0 == EncodeGHZ(Cardinality(Acceptor), Distance)
+      ψ1 == ApplyZ(ψ0, votes)
+      bits == MeasureX(Channel(ψ1))
+  IN  Majority(bits)
+
+(* Safety is classical Paxos on the *decoded* bits.
+   Quantum noise is a (possibly correlated) crash+corruption
+   of 2b messages. Uniqueness is inherited from Inv of
+   BasicPaxos provided p_L is treated as a Byzantine fraction
+   f_Q = n * p_L and f_Q < n/2. *)
+EncodedChosen(v) ==
+  /\\ \\E b \\in Nat, Q \\in Quorum :
+        \\A a \\in Q : Decoded2b(a, b) = v
+  /\\ LogicalError(pDepol, Distance) * Cardinality(Acceptor) <
+        Cardinality(Acceptor) \\div 2
+
+THEOREM Spec => [](EncodedChosen(v1) /\\ EncodedChosen(v2) => v1 = v2)
+(* Proof: reduce to BasicPaxos Inv after decode. Each logical
+   error is a Byzantine 2b. Quorum intersection still holds
+   among non-errored acceptors while f_Q < n/2. *)
+=============================================================================`;
+var P_GRID = [
+	5e-4,
+	.001,
+	.002,
+	.004,
+	.006,
+	.008,
+	.01,
+	.015,
+	.02
+];
+function QuantumLab() {
+	const [p, setP] = (0, import_react.useState)(.01);
+	const [gamma, setGamma] = (0, import_react.useState)(.02);
+	const [shots, setShots] = (0, import_react.useState)(400);
+	const [votes, setVotes] = (0, import_react.useState)([
+		1,
+		1,
+		0
+	]);
+	const [seed, setSeed] = (0, import_react.useState)(0);
+	const result = (0, import_react.useMemo)(() => sampleConsensus(votes, {
+		depolarizing: p,
+		amplitudeDamping: gamma
+	}, shots), [
+		p,
+		gamma,
+		shots,
+		votes,
+		seed
+	]);
+	const curves = DISTANCES.map((d) => ({
+		d,
+		pts: P_GRID.map((x) => ({
+			x,
+			y: logicalError(x, d)
+		}))
+	}));
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+		className: "grid min-w-0 gap-8 lg:grid-cols-2",
+		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "flex flex-col gap-5",
+			children: [
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", { children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "font-mono text-xs uppercase tracking-widest text-faint",
+						children: "Quantum consensus"
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+						className: "font-display text-2xl font-medium tracking-tight",
+						children: "GHZ voting + surface code"
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+						className: "mt-2 max-w-prose text-sm leading-relaxed text-muted",
+						children: [
+							"Three acceptors share a GHZ state. Votes are Z phases; X-measurement majority is the decided bit. The same bits feed classical Paxos uniqueness. Noise is depolarizing composed with amplitude damping. Logical qubits use a distance-d surface code with p",
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("sub", { children: "th" }),
+							" ≈ ",
+							P_THRESHOLD,
+							"."
+						]
+					})
+				] }),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "grid gap-4 sm:grid-cols-3",
+					children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+							className: "text-xs text-muted",
+							children: [
+								"depolarizing p",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+									type: "range",
+									min: 0,
+									max: .08,
+									step: .001,
+									value: p,
+									onChange: (e) => setP(Number(e.target.value)),
+									className: "mt-2 w-full"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "font-mono text-fg tabular-nums",
+									children: p.toFixed(3)
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+							className: "text-xs text-muted",
+							children: [
+								"amplitude damping γ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+									type: "range",
+									min: 0,
+									max: .2,
+									step: .005,
+									value: gamma,
+									onChange: (e) => setGamma(Number(e.target.value)),
+									className: "mt-2 w-full"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "font-mono text-fg tabular-nums",
+									children: gamma.toFixed(3)
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+							className: "text-xs text-muted",
+							children: [
+								"shots",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+									type: "range",
+									min: 50,
+									max: 2e3,
+									step: 50,
+									value: shots,
+									onChange: (e) => setShots(Number(e.target.value)),
+									className: "mt-2 w-full"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "font-mono text-fg tabular-nums",
+									children: shots
+								})
+							]
+						})
+					]
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "flex flex-wrap items-center gap-2",
+					children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+							className: "text-xs text-faint",
+							children: "votes"
+						}),
+						votes.map((v, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+							size: "sm",
+							variant: v ? "primary" : "secondary",
+							onClick: () => {
+								const next = [...votes];
+								next[i] = v ? 0 : 1;
+								setVotes(next);
+							},
+							children: [
+								"a",
+								i + 1,
+								"=",
+								v
+							]
+						}, i)),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
+							size: "sm",
+							variant: "ghost",
+							onClick: () => setSeed((s) => s + 1),
+							children: "Resample"
+						})
+					]
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("dl", {
+					className: "grid grid-cols-2 gap-3 rounded-xl border border-border bg-surface p-4 sm:grid-cols-4",
+					children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Stat, {
+							label: "intended bit",
+							value: String(result.intended)
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Stat, {
+							label: "success",
+							value: `${(result.successRate * 100).toFixed(1)}%`
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Stat, {
+							label: "X⊗X⊗X = +1",
+							value: `${(result.stabilizerRate * 100).toFixed(1)}%`
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Stat, {
+							label: "d=5 encoded",
+							value: `${(encodedSuccess(p, 5) * 100).toFixed(2)}%`
+						})
+					]
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					className: "mb-2 font-mono text-xs text-faint",
+					children: "computational histogram"
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+					className: "grid grid-cols-8 gap-1",
+					children: result.histogram.map((c, i) => {
+						const h = Math.round(c / result.shots * 96);
+						const label = i.toString(2).padStart(3, "0");
+						return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex flex-col items-center gap-1",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "flex h-24 w-full items-end rounded-sm bg-subtle",
+								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+									className: "w-full rounded-sm bg-accent",
+									style: { height: `${c ? Math.max(h, 3) : 0}px` }
+								})
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "font-mono text-xs text-faint",
+								children: label
+							})]
+						}, i);
+					})
+				})] }),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					className: "mb-2 font-mono text-xs text-faint",
+					children: "p_L(p, d) = 0.03 (p / p_th)^((d+1)/2)"
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SurfaceChart, {
+					curves,
+					p
+				})] })
+			]
+		}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "min-w-0",
+			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+				className: "font-mono text-xs uppercase tracking-widest text-faint",
+				children: "QuantumPaxos.tla"
+			}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("pre", {
+				className: "mt-2 max-h-96 overflow-auto rounded-xl border border-border bg-subtle p-3 font-mono text-xs leading-relaxed text-muted",
+				children: QUANTUM_SKETCH
+			})]
+		})]
+	});
+}
+function Stat({ label, value }) {
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("dt", {
+		className: "text-xs text-faint",
+		children: label
+	}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("dd", {
+		className: "font-mono text-sm text-fg tabular-nums",
+		children: value
+	})] });
+}
+function SurfaceChart({ curves, p }) {
+	const W = 520;
+	const H = 220;
+	const pad = {
+		l: 36,
+		r: 8,
+		t: 8,
+		b: 24
+	};
+	const maxP = .02;
+	const maxY = .5;
+	const x = (v) => pad.l + v / maxP * (W - pad.l - pad.r);
+	const y = (v) => pad.t + (1 - v / maxY) * (H - pad.t - pad.b);
+	const opac = [
+		"0.35",
+		"0.5",
+		"0.7",
+		"0.85",
+		"1"
+	];
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("svg", {
+		viewBox: `0 0 ${W} ${H}`,
+		className: "h-auto w-full",
+		role: "img",
+		"aria-label": "Logical error vs physical error",
+		children: [
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("line", {
+				x1: pad.l,
+				y1: H - pad.b,
+				x2: W - pad.r,
+				y2: H - pad.b,
+				stroke: "var(--color-border)"
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("line", {
+				x1: pad.l,
+				y1: pad.t,
+				x2: pad.l,
+				y2: H - pad.b,
+				stroke: "var(--color-border)"
+			}),
+			curves.map((c, i) => {
+				const d = c.pts.map((pt, k) => `${k === 0 ? "M" : "L"} ${x(pt.x)} ${y(pt.y)}`).join(" ");
+				return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", {
+					d,
+					fill: "none",
+					stroke: "var(--color-accent)",
+					strokeOpacity: opac[i],
+					strokeWidth: "1.4"
+				}, c.d);
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("line", {
+				x1: x(p),
+				y1: pad.t,
+				x2: x(p),
+				y2: H - pad.b,
+				stroke: "var(--color-warn)",
+				strokeDasharray: "3 3"
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("text", {
+				x: x(maxP),
+				y: 214,
+				textAnchor: "end",
+				fill: "var(--color-faint)",
+				fontSize: "10",
+				fontFamily: "var(--font-mono)",
+				children: "p"
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("text", {
+				x: 4,
+				y: 14,
+				fill: "var(--color-faint)",
+				fontSize: "10",
+				fontFamily: "var(--font-mono)",
+				children: "p_L"
+			}),
+			DISTANCES.map((d, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("text", {
+				x: 512,
+				y: 18 + i * 12,
+				textAnchor: "end",
+				fill: "var(--color-accent)",
+				fillOpacity: opac[i],
+				fontSize: "10",
+				fontFamily: "var(--font-mono)",
+				children: ["d=", d]
+			}, d))
+		]
+	});
+}
 var RAFT_MUTS = [
 	{
 		id: "none",
@@ -3635,15 +4372,18 @@ function TlcPanel({ kind }) {
 	const cmd = kind === "raft" ? RAFT_TLC_CMD : PAXOS_TLC_CMD;
 	const cfg = kind === "raft" ? RAFT_CFG : PAXOS_CFG;
 	const muts = kind === "raft" ? RAFT_MUTS : PAXOS_MUTS;
-	const run = () => {
+	const run = (mut = mutation) => {
 		setRunning(true);
 		setResult(null);
 		window.setTimeout(() => {
-			const r = kind === "raft" ? runRaftTLC(mutation) : runPaxosTLC(1, mutation);
+			const r = kind === "raft" ? runRaftTLC(mut) : runPaxosTLC(1, mut);
 			setResult(r);
 			setRunning(false);
 		}, 20);
 	};
+	(0, import_react.useEffect)(() => {
+		run("none");
+	}, [kind]);
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 		className: "flex flex-col gap-4",
 		children: [
@@ -3681,14 +4421,14 @@ function TlcPanel({ kind }) {
 					type: "button",
 					onClick: () => {
 						setMutation(m.id);
-						setResult(null);
+						run(m.id);
 					},
 					className: cn("rounded-md px-3 py-2 text-xs", mutation === m.id ? "bg-subtle text-fg" : "text-faint hover:text-fg"),
 					children: m.label
 				}, m.id))
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
-				onClick: run,
+				onClick: () => run(),
 				disabled: running,
 				className: "w-fit",
 				children: running ? "Checking…" : "Check model"
@@ -3886,6 +4626,10 @@ function paxosInvariants(state) {
 }
 var NAV = [
 	{
+		id: "argument",
+		label: "Argument"
+	},
+	{
 		id: "raft",
 		label: "Raft"
 	},
@@ -3921,15 +4665,20 @@ function subsFor(mod) {
 		"tlc",
 		"proofs"
 	];
-	if (mod === "multi") return ["spec", "proofs"];
+	if (mod === "multi") return [
+		"spec",
+		"exec",
+		"proofs"
+	];
 	if (mod === "byzantine") return ["spec", "exec"];
 	return [];
 }
 function Workbench() {
-	const [mod, setMod] = (0, import_react.useState)("raft");
+	const [mod, setMod] = (0, import_react.useState)("argument");
 	const [sub, setSub] = (0, import_react.useState)("spec");
 	const [sim, setSim] = (0, import_react.useState)(null);
 	const [paxos, setPaxos] = (0, import_react.useState)(() => createPaxos());
+	const [multi, setMulti] = (0, import_react.useState)(() => createMulti());
 	const [pbft, setPbft] = (0, import_react.useState)(() => createPbft());
 	const [selected, setSelected] = (0, import_react.useState)(0);
 	const [draft, setDraft] = (0, import_react.useState)("v1");
@@ -3979,6 +4728,11 @@ function Workbench() {
 			return next;
 		});
 	};
+	const open = (next, nextSub) => {
+		setMod(next);
+		const available = subsFor(next);
+		setSub(nextSub && available.includes(nextSub) ? nextSub : available[0] ?? "spec");
+	};
 	const available = subsFor(mod);
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 		className: "min-h-dvh bg-bg",
@@ -3988,13 +4742,18 @@ function Workbench() {
 				className: "mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:px-6",
 				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 					className: "flex items-baseline justify-between gap-3",
-					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-						className: "font-mono text-xs uppercase tracking-widest text-faint",
-						children: "Formal consensus workbench"
-					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", {
-						className: "font-display text-2xl font-medium tracking-tight sm:text-3xl",
-						children: "QFL"
-					})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+						type: "button",
+						className: "text-left",
+						onClick: () => setMod("argument"),
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+							className: "font-mono text-xs uppercase tracking-widest text-faint",
+							children: "Formal consensus workbench"
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", {
+							className: "font-display text-2xl font-medium tracking-tight sm:text-3xl",
+							children: "QFL"
+						})]
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 						className: "hidden max-w-sm text-right text-xs leading-relaxed text-faint sm:block",
 						children: "Annotated TLA+, proof obligations, TLC with mutations, GHZ + surface code, mesa / Löb / HoTT."
 					})]
@@ -4025,6 +4784,7 @@ function Workbench() {
 						children: s
 					}, s))
 				}) : null,
+				mod === "argument" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(OverviewLab, { onOpen: open }) : null,
 				mod === "raft" && sub === "spec" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SpecPanel, { doc: RAFT_SPEC }) : null,
 				mod === "raft" && sub === "tlc" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(TlcPanel, { kind: "raft" }) : null,
 				mod === "raft" && sub === "proofs" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ProofsPanel, {
@@ -4050,9 +4810,13 @@ function Workbench() {
 					edit: editPaxos
 				}) : null,
 				mod === "multi" && sub === "spec" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SpecPanel, { doc: MULTI_SPEC }) : null,
+				mod === "multi" && sub === "exec" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MultiExec, {
+					state: multi,
+					setState: setMulti
+				}) : null,
 				mod === "multi" && sub === "proofs" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ProofsPanel, {
-					title: "MultiPaxos / Raft",
-					items: RAFT_OBLIGATIONS
+					title: "MultiPaxos",
+					items: MULTI_OBLIGATIONS
 				}) : null,
 				mod === "mapping" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MappingLab, {}) : null,
 				mod === "byzantine" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ByzantineLab, {
@@ -4063,7 +4827,10 @@ function Workbench() {
 				mod === "quantum" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(QuantumLab, {}) : null,
 				mod === "mesa" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MesaLab, {
 					raft: sim,
-					paxos
+					paxos,
+					onStarve: (on) => mutate((s) => {
+						s.mesaStarveCatchup = on;
+					})
 				}) : null
 			]
 		})]
@@ -4137,6 +4904,14 @@ function RaftExec({ sim, selected, draft, setDraft, setSelected, mutate }) {
 							size: "sm",
 							variant: "ghost",
 							onClick: () => mutate((s) => {
+								s.mesaStarveCatchup = !s.mesaStarveCatchup;
+							}),
+							children: sim.mesaStarveCatchup ? "Catch-up on" : "Mesa starve"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
+							size: "sm",
+							variant: "ghost",
+							onClick: () => mutate((s) => {
 								const fresh = createSim();
 								Object.assign(s, fresh);
 							}),
@@ -4154,7 +4929,8 @@ function RaftExec({ sim, selected, draft, setDraft, setSelected, mutate }) {
 						" · term=",
 						leader?.currentTerm ?? "—",
 						" · msgs=",
-						sim.network.length
+						sim.network.length,
+						sim.mesaStarveCatchup ? " · MESA starve-catch-up" : ""
 					]
 				}),
 				/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ClusterView, {

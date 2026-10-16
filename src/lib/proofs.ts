@@ -117,6 +117,41 @@ export const PAXOS_OBLIGATIONS: Obligation[] = [
   },
 ];
 
+export const MULTI_OBLIGATIONS: Obligation[] = [
+  {
+    id: "amortize",
+    lemma: "Phase1Amortized",
+    statement: "Promises collected for ballot b covering slots ≥ fromSlot apply independently at each slot.",
+    discharge: "maxBal is global, not per-slot. The 1b payload is a vector (mbal[s], mval[s]). Safety of slot s does not depend on slot s'.",
+    method: "TLAPS",
+    depends: ["quorum"],
+  },
+  {
+    id: "force-slot",
+    lemma: "ForcedPerSlot",
+    statement: "Phase2Slot(b, s, v) carries v = Forced(b,s) if any promise reports an accepted value at s.",
+    discharge: "Same as Basic Paxos SafeValue, indexed by s. Dropping it is skip-force per slot.",
+    method: "TLC",
+    depends: ["amortize"],
+  },
+  {
+    id: "at-most-one",
+    lemma: "AtMostOneValue(s)",
+    statement: "∀ s : Chosen(s, v1) ∧ Chosen(s, v2) ⇒ v1 = v2.",
+    discharge: "Reduce to BasicPaxos Inv at each slot.",
+    method: "TLC",
+    depends: ["force-slot"],
+  },
+  {
+    id: "prefix",
+    lemma: "CommittedPrefix",
+    statement: "The contiguous prefix {1..c} of decided slots is the committed log (Raft commitIndex).",
+    discharge: "Decide(s) only when a quorum accepted (b,s,v). Linearizability of the prefix is StateMachineSafety.",
+    method: "TLAPS",
+    depends: ["at-most-one"],
+  },
+];
+
 export const MESA_OBLIGATIONS: Obligation[] = [
   {
     id: "obs",
@@ -131,6 +166,14 @@ export const MESA_OBLIGATIONS: Obligation[] = [
     lemma: "MesaFreeProposer",
     statement: "Issued2a(p, b, v) ⇒ ForcedValue(b, v) ∨ NoPrevious(b).",
     discharge: "A mesa proposer is protocol-legal on free choice (NoPrevious) but selects v maximizing a hidden objective. Detection: compare v to the client value / specified utility, not to Inv.",
+    method: "TLC",
+    depends: ["obs"],
+  },
+  {
+    id: "free-l",
+    lemma: "MesaFreeLeader",
+    statement: "A leader's AppendEntries to follower f carries log[nextIndex[f] .. Last]. Heartbeats-only (empty entries) is protocol-legal and starves log-fidelity.",
+    discharge: "ObservableLegal holds. MesaFree fails on U = log-fidelity. Inv uniqueness still holds. Toggle mesaStarveCatchup in the Raft cluster.",
     method: "TLC",
     depends: ["obs"],
   },

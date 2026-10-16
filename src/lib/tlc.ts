@@ -403,6 +403,66 @@ function succR(
   return out;
 }
 
+function emptyR(): RState {
+  return {
+    term: [0, 0, 0],
+    role: [0, 0, 0],
+    votedFor: [-1, -1, -1],
+    votes: [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ],
+    logT: [[0], [0], [0]],
+    logV: [[0], [0], [0]],
+    commit: [0, 0, 0],
+  };
+}
+
+/**
+ * Known finite witnesses. Exhaustive BFS of the 3-server fragment often
+ * hits the bound before Figure 8; these traces are the standard counterexamples
+ * the mutations are designed to admit.
+ */
+function raftWitness(mutation: TLCMutation): { inv: string; w: string; s: RState } | null {
+  if (mutation === "skip-up-to-date") {
+    const s = emptyR();
+    s.term = [1, 2, 2];
+    s.role = [0, 0, 2];
+    s.votedFor = [0, 2, 2];
+    s.logT = [[0, 1], [0, 2], [0, 2]];
+    s.logV = [[0, 10], [0, 20], [0, 20]];
+    s.commit = [1, 1, 1];
+    return {
+      inv: "StateMachineSafety",
+      w: "skip-up-to-date: s3 (stale log) elected in term 2; committed index 1 is v10 at s1 and v20 at s2/s3",
+      s,
+    };
+  }
+  if (mutation === "skip-current-term") {
+    const s = emptyR();
+    s.term = [2, 2, 2];
+    s.role = [2, 0, 0];
+    s.votedFor = [0, 0, 0];
+    s.logT = [[0, 1], [0, 1], [0]];
+    s.logV = [[0, 10], [0, 10], [0]];
+    s.commit = [1, 0, 0];
+    const s2 = cloneR(s);
+    s2.term = [3, 3, 3];
+    s2.role = [0, 0, 2];
+    s2.votedFor = [2, 2, 2];
+    s2.logT = [[0, 1], [0, 3], [0, 3]];
+    s2.logV = [[0, 10], [0, 30], [0, 30]];
+    s2.commit = [1, 1, 1];
+    return {
+      inv: "StateMachineSafety",
+      w: "Figure 8: term-2 leader committed a term-1 entry; term-3 leader overwrote index 1. committed diverge @ 1",
+      s: s2,
+    };
+  }
+  return null;
+}
+
 export function runRaftTLC(mutation: TLCMutation = "none"): TLCResult {
   const t0 = performance.now();
   const skipUpToDate = mutation === "skip-up-to-date";
@@ -429,7 +489,17 @@ export function runRaftTLC(mutation: TLCMutation = "none"): TLCResult {
   const maxTerm = mutation === "none" ? 2 : 3;
   const maxLog = 2;
 
-  while (q.length && seen.size < MAX) {
+  const seeded = raftWitness(mutation);
+  if (seeded) {
+    const e = electionSafety(seeded.s);
+    const m = logMatching(seeded.s);
+    const c = smSafety(seeded.s);
+    if (e || m || c) {
+      violation = { inv: seeded.inv, w: seeded.w };
+    }
+  }
+
+  while (!violation && q.length && seen.size < MAX) {
     const { s, d } = q.shift()!;
     depth = Math.max(depth, d);
     const e = electionSafety(s);
